@@ -2,7 +2,7 @@
 {% import 'components/icons.html.twig' as icons %}
 
 {% block title %}Nouveau formulaire HelloAsso — {{ client.name }} - Cyllos{% endblock %}
-{% block content_width %}content--narrow{% endblock %}
+{% block content_width %}content--full{% endblock %}
 
 {% block breadcrumb %}<div class="topbar__crumb"><a href="{{ path('admin_client_list') }}">Clients</a> / <a href="{{ path('admin_client_show', {id: client.id}) }}">{{ client.name }}</a> / Nouveau formulaire HelloAsso</div>{% endblock %}
 {% block page_title %}Nouveau formulaire HelloAsso{% endblock %}
@@ -19,7 +19,7 @@
             <div class="field-group">
                 <h2 style="font-size:1rem;margin-bottom:1.1rem;">Identifiants et paramètres HelloAsso</h2>
                 {% include 'admin/client/_helloasso_label_fields.html.twig' with {form: form} only %}
-                <div class="form-grid">
+                <div class="form-grid form-grid--wide">
                     {{ form_row(form.apiUrl) }}
                     {{ form_row(form.helloAssoClientId) }}
                     {{ form_row(form.clientSecret) }}
