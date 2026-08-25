@@ -7,6 +7,7 @@ use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Validator\Constraints as Assert;
 
 #[ORM\Entity(repositoryClass: HelloAssoConfigRepository::class)]
+#[ORM\UniqueConstraint(name: 'client_helloasso_form_unique', columns: ['client_id', 'form_slug'])]
 class HelloAssoConfig
 {
     #[ORM\Id]
@@ -14,9 +15,26 @@ class HelloAssoConfig
     #[ORM\Column(type: 'integer')]
     private ?int $id = null;
 
-    #[ORM\OneToOne(inversedBy: 'helloAssoConfig', targetEntity: Client::class)]
-    #[ORM\JoinColumn(nullable: false, unique: true)]
+    #[ORM\ManyToOne(inversedBy: 'helloAssoConfigs', targetEntity: Client::class)]
+    #[ORM\JoinColumn(nullable: false)]
     private ?Client $client = null;
+
+    /**
+     * Free-form admin-facing name distinguishing this config from a client's
+     * other HelloAsso forms (e.g. "Particuliers" / "Professionnels").
+     */
+    #[ORM\Column(length: 100)]
+    #[Assert\NotBlank]
+    private string $label = '';
+
+    /**
+     * Disabling keeps the config (and the payment history that references
+     * it) around while rejecting new webhooks/fetches for it — used instead
+     * of deletion, since a config with payment history can't be deleted
+     * (see the Payment::$helloAssoConfig FK).
+     */
+    #[ORM\Column]
+    private bool $active = true;
 
     #[ORM\Column(length: 255)]
     #[Assert\NotBlank]
@@ -78,6 +96,30 @@ class HelloAssoConfig
     public function setClient(?Client $client): static
     {
         $this->client = $client;
+
+        return $this;
+    }
+
+    public function getLabel(): string
+    {
+        return $this->label;
+    }
+
+    public function setLabel(string $label): static
+    {
+        $this->label = $label;
+
+        return $this;
+    }
+
+    public function isActive(): bool
+    {
+        return $this->active;
+    }
+
+    public function setActive(bool $active): static
+    {
+        $this->active = $active;
 
         return $this;
     }

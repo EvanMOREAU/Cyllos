@@ -16,11 +16,13 @@
                 {{ form_row(form.paymentCyclosEnabled) }}
                 {{ form_row(form.paymentAutomaticEnabled) }}
                 {{ form_row(form.mailRecipient) }}
+                {{ form_row(form.notifySuccessOnPayment) }}
+                {{ form_row(form.notifyFailureOnPayment) }}
             </div>
             <div class="form-footer">
                 <a class="btn btn--ghost" href="{{ path('admin_client_new_cyclos') }}">← Retour</a>
                 <button class="btn" type="submit">Créer le client</button>
             </div>
-        {{ form_end(form) }}
+        {{ form_end(form, {render_rest: false}) }}
     </div>
 {% endblock %}

@@ -22,6 +22,18 @@ class Payment
     private ?Client $client = null;
 
     /**
+     * The HelloAsso form this payment came from, captured once at creation.
+     * Needed later (manual credit, late-payment retry, catch-up "credit all")
+     * to know which HelloAsso credentials/settings to use — by then, the
+     * client may have more than one config and there's no other way to tell
+     * them apart. Restricted from deletion (see HelloAssoConfig), so this
+     * never dangles.
+     */
+    #[ORM\ManyToOne(targetEntity: HelloAssoConfig::class)]
+    #[ORM\JoinColumn(nullable: false)]
+    private ?HelloAssoConfig $helloAssoConfig = null;
+
+    /**
      * Payment id as given by HelloAsso, unique per client.
      */
     #[ORM\Column]
@@ -72,6 +84,7 @@ class Payment
 
     public function __construct(
         Client $client,
+        HelloAssoConfig $helloAssoConfig,
         int $helloAssoPaymentId,
         \DateTimeImmutable $paymentDate,
         float $amount,
@@ -80,6 +93,7 @@ class Payment
         string $email,
     ) {
         $this->client = $client;
+        $this->helloAssoConfig = $helloAssoConfig;
         $this->helloAssoPaymentId = $helloAssoPaymentId;
         $this->paymentDate = $paymentDate;
         $this->amount = $amount;
@@ -99,6 +113,11 @@ class Payment
     public function getClient(): Client
     {
         return $this->client;
+    }
+
+    public function getHelloAssoConfig(): HelloAssoConfig
+    {
+        return $this->helloAssoConfig;
     }
 
     public function getHelloAssoPaymentId(): int

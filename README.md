@@ -5,8 +5,9 @@
 Cyllos écoute les paiements HelloAsso de plusieurs clients (monnaies locales) et
 crédite automatiquement leur compte Cyclos correspondant. C'est une réécriture
 multi-tenant d'[Hellos](https://github.com/jymaire/hellos), sous Symfony : une seule
-application gère l'ensemble des clients, chacun avec ses propres identifiants
-HelloAsso et sa propre connexion Cyclos.
+application gère l'ensemble des clients, chacun avec un ou plusieurs formulaires
+HelloAsso (typiquement un pour les particuliers, un pour les professionnels) et sa
+propre connexion Cyclos.
 
 ## Fonctionnement
 
@@ -14,8 +15,13 @@ HelloAsso et sa propre connexion Cyclos.
 
 Une seule instance de Cyllos gère tous les clients Cylaos. Chaque `Client` porte
 un slug unique et possède sa propre configuration :
-- `HelloAssoConfig` : identifiants API HelloAsso (client ID/secret chiffré),
-  organisation, formulaire ciblé, montant maximum autorisé par paiement ;
+- `HelloAssoConfig` (un ou plusieurs par client) : identifiants API HelloAsso
+  (client ID/secret chiffré), organisation, formulaire ciblé, montant maximum
+  autorisé par paiement, libellé et statut actif/inactif. Un client garde
+  toujours au moins un formulaire actif ; un formulaire désactivé ne peut être
+  supprimé que s'il n'a aucun paiement enregistré et n'est pas le formulaire
+  principal du client (le plus ancien — jamais supprimable, même sans
+  historique) ;
 - `CyclosConfig` : URL de l'instance Cyclos, utilisateur technique et mot de
   passe (chiffré), groupes Cyclos "pro"/"particulier" et types d'émission
   associés ;
@@ -40,10 +46,13 @@ base avec `APP_ENCRYPTION_KEY` via `SecretEncryptor` — jamais stockés en clai
 
 ### Cycle de vie d'un paiement
 
-1. **Réception** : HelloAsso notifie Cyllos par webhook
-   (`POST /webhook/helloasso/{slug}`) à chaque paiement. `PaymentProcessor`
-   valide la notification (bon formulaire, montant sous la limite, état
-   `Authorized`/`Waiting`, pas de doublon) et crée un `Payment`.
+1. **Réception** : HelloAsso notifie Cyllos par webhook — une seule URL par
+   client (`POST /webhook/helloasso/{slug}`), quel que soit son nombre de
+   formulaires ; c'est le `formSlug` inclus dans la notification qui indique
+   lequel des formulaires actifs du client est concerné. `PaymentProcessor`
+   valide la notification (formulaire actif reconnu, montant sous la limite
+   *de ce formulaire*, état `Authorized`/`Waiting`, pas de doublon) et crée un
+   `Payment`.
 2. **Décision** :
    - si le crédit automatique est désactivé pour ce client → le paiement reste
      `Todo`, à créditer manuellement depuis `/admin` ou l'espace client ;
@@ -57,9 +66,11 @@ base avec `APP_ENCRYPTION_KEY` via `SecretEncryptor` — jamais stockés en clai
    utilisé directement ; sinon recherche de l'utilisateur par l'email payeur
    (avec repli sur un email alternatif récupéré via l'API HelloAsso si
    introuvable), détermination du type d'émission selon son groupe Cyclos,
-   vérification anti-doublon (un paiement avec la même description n'a pas
-   déjà été crédité), puis exécution du paiement — ou simple `preview` si les
-   paiements Cyclos sont désactivés pour ce client (`PreviewOk`).
+   vérification anti-doublon (recherche la description attendue parmi les 50
+   dernières transactions de crédit de l'utilisateur — pas seulement la
+   dernière, voir `CyclosClient::DUPLICATE_CHECK_WINDOW`), puis exécution du
+   paiement — ou simple `preview` si les paiements Cyclos sont désactivés pour
+   ce client (`PreviewOk`).
 4. **Rattrapage** : en complément du webhook temps réel, `app:helloasso:fetch`
    interroge l'historique HelloAsso de chaque client actif pour récupérer tout
    paiement manqué (notification perdue, HelloAsso indisponible, etc.). Deux
@@ -79,10 +90,11 @@ d'erreur le cas échéant, visible dans les listes de paiements.
 ### Espaces applicatifs
 
 - **`/admin`** (`ROLE_ADMIN`) : vue transverse sur tous les clients — gestion
-  des clients (assistant de création en 4 étapes, config HelloAsso/Cyclos/
-  réglages), tous les paiements avec filtre par client (colonne "E-mail
-  HelloAsso" par paiement, avec indicateur si une règle `EmailAlias` existe
-  déjà et raccourci pour en créer une pré-remplie sinon), crédit/suppression
+  des clients (assistant de création en 4 étapes, config Cyclos/réglages,
+  formulaire(s) HelloAsso ajoutables/désactivables/supprimables), tous les
+  paiements avec filtre par client (colonne "Formulaire" indiquant lequel a
+  reçu le paiement, colonne "E-mail HelloAsso" avec indicateur si une règle
+  `EmailAlias` existe déjà et raccourci pour en créer une pré-remplie sinon), crédit/suppression
   manuels, synchro HelloAsso à la demande, recherche globale, et comptes
   utilisateurs par client (création, réinitialisation de mot de passe,
   activation/désactivation, suppression — un compte désactivé ne peut plus
@@ -214,12 +226,21 @@ php -S 127.0.0.1:8000 -t public
 ## Configurer un client
 
 Depuis `/admin/clients`, créer un client avec :
-- ses identifiants HelloAsso (client ID/secret, organisation, formulaire) ;
+- son premier formulaire HelloAsso (client ID/secret, organisation, formulaire) ;
 - sa connexion Cyclos (URL, utilisateur technique, groupes/émissions) ;
 - ses réglages (paiements Cyclos actifs, mode automatique, email de notification).
 
 L'URL du webhook à renseigner côté HelloAsso ("Intégrations et API") est
 affichée sur la page du client : `/webhook/helloasso/{slug}`.
+
+Si ce client utilise plusieurs formulaires HelloAsso (ex. un pour les
+particuliers, un pour les professionnels), un second (ou troisième) formulaire
+peut être ajouté depuis sa fiche (bouton "+ Ajouter un formulaire HelloAsso") —
+les identifiants (URL API, Client ID, organisation, secret) sont pré-remplis à
+partir du premier formulaire, à ajuster seulement si ce nouveau formulaire
+utilise réellement un autre compte HelloAsso. La même URL de webhook s'utilise
+pour tous les formulaires du client, rien à reconfigurer côté HelloAsso au-delà
+d'y renseigner cette URL sur le nouveau formulaire.
 
 Créer ensuite un compte pour ce client (accès limité à ses propres paiements) :
 

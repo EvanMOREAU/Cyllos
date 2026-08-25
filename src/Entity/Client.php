@@ -48,8 +48,16 @@ class Client
     #[Assert\Email]
     private ?string $contactEmail = null;
 
-    #[ORM\OneToOne(mappedBy: 'client', targetEntity: HelloAssoConfig::class, cascade: ['persist', 'remove'])]
-    private ?HelloAssoConfig $helloAssoConfig = null;
+    /**
+     * Ordered by id (creation order) rather than left to the database's
+     * default — several call sites (the "primary form" check in
+     * ClientController, the credential-prefill source when adding a new
+     * form) rely on ->first() meaning "the client's original form", which
+     * needs a deterministic order to mean anything.
+     */
+    #[ORM\OneToMany(mappedBy: 'client', targetEntity: HelloAssoConfig::class, cascade: ['persist', 'remove'])]
+    #[ORM\OrderBy(['id' => 'ASC'])]
+    private Collection $helloAssoConfigs;
 
     #[ORM\OneToOne(mappedBy: 'client', targetEntity: CyclosConfig::class, cascade: ['persist', 'remove'])]
     private ?CyclosConfig $cyclosConfig = null;
@@ -64,6 +72,7 @@ class Client
     {
         $this->createdAt = new \DateTimeImmutable();
         $this->payments = new ArrayCollection();
+        $this->helloAssoConfigs = new ArrayCollection();
     }
 
     public function getId(): ?int
@@ -136,17 +145,48 @@ class Client
         return $this;
     }
 
-    public function getHelloAssoConfig(): ?HelloAssoConfig
+    /**
+     * @return Collection<int, HelloAssoConfig>
+     */
+    public function getHelloAssoConfigs(): Collection
     {
-        return $this->helloAssoConfig;
+        return $this->helloAssoConfigs;
     }
 
-    public function setHelloAssoConfig(?HelloAssoConfig $helloAssoConfig): static
+    /**
+     * @return Collection<int, HelloAssoConfig>
+     */
+    public function getActiveHelloAssoConfigs(): Collection
     {
-        $this->helloAssoConfig = $helloAssoConfig;
-        if ($helloAssoConfig !== null && $helloAssoConfig->getClient() !== $this) {
-            $helloAssoConfig->setClient($this);
+        return $this->helloAssoConfigs->filter(static fn (HelloAssoConfig $config) => $config->isActive());
+    }
+
+    /**
+     * The client's original HelloAsso form (oldest by id) — the one it had
+     * before it's ever had a second. Unlike any form added afterward, it can
+     * never be deleted (see ClientController::deleteHelloAssoConfig()),
+     * only deactivated: a client that has only ever had one form shouldn't
+     * lose it to a stray click just because it happens to have no payment
+     * history yet.
+     */
+    public function getPrimaryHelloAssoConfig(): ?HelloAssoConfig
+    {
+        return $this->helloAssoConfigs->isEmpty() ? null : $this->helloAssoConfigs->first();
+    }
+
+    public function addHelloAssoConfig(HelloAssoConfig $config): static
+    {
+        if (!$this->helloAssoConfigs->contains($config)) {
+            $this->helloAssoConfigs->add($config);
+            $config->setClient($this);
         }
+
+        return $this;
+    }
+
+    public function removeHelloAssoConfig(HelloAssoConfig $config): static
+    {
+        $this->helloAssoConfigs->removeElement($config);
 
         return $this;
     }

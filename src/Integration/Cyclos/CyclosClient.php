@@ -18,6 +18,19 @@ class CyclosClient
 {
     public const PAYMENT_DESCRIPTION_PREFIX = 'Paiement automatique, id technique ';
 
+    /**
+     * How many of the user's most recent credit transactions
+     * hasAlreadyCreditedPayment() scans for a match. Cyclos's transaction
+     * search has no server-side filter on description (confirmed against a
+     * real instance: a `keywords` parameter is silently ignored), so there's
+     * no way to ask it directly "does this description exist anywhere" —
+     * this is a bounded client-side scan instead. Large enough that another
+     * transaction landing on the account between the original credit and a
+     * later retry doesn't hide it, without fetching a user's entire history
+     * on every check.
+     */
+    private const DUPLICATE_CHECK_WINDOW = 50;
+
     private const REQUEST_TIMEOUT = 60.0;
 
     public function __construct(
@@ -82,8 +95,13 @@ class CyclosClient
     }
 
     /**
-     * Anti-duplicate check: looks at the user's last credit transaction and compares
-     * its description to the one we would use for this payment.
+     * Anti-duplicate check: scans the user's recent credit transactions (see
+     * DUPLICATE_CHECK_WINDOW) for one whose description matches the one we'd
+     * use for this payment — not just the single most recent transaction,
+     * which would miss it as soon as anything else got credited to the same
+     * account afterward (this is exactly how a real double-credit happened:
+     * a payment's local status was reset, and re-crediting it went through
+     * because an unrelated transaction had since become "the last one").
      */
     public function hasAlreadyCreditedPayment(CyclosConfig $config, string $email, string $expectedDescription): bool
     {
@@ -96,7 +114,7 @@ class CyclosClient
                     'kinds' => '',
                     'orderBy' => 'dateDesc',
                     'page' => 1,
-                    'pageSize' => 1,
+                    'pageSize' => self::DUPLICATE_CHECK_WINDOW,
                 ],
             ]);
 
@@ -104,12 +122,13 @@ class CyclosClient
                 return false;
             }
 
-            $transactions = $response->toArray(false);
-            if ($transactions === []) {
-                return false;
+            foreach ($response->toArray(false) as $transaction) {
+                if (($transaction['description'] ?? null) === $expectedDescription) {
+                    return true;
+                }
             }
 
-            return ($transactions[0]['description'] ?? null) === $expectedDescription;
+            return false;
         } catch (HttpClientExceptionInterface $exception) {
             $this->logger->error('Error checking Cyclos duplicate payment: {message}', ['message' => $exception->getMessage()]);
 

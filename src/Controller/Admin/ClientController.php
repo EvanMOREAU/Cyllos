@@ -5,6 +5,7 @@ namespace App\Controller\Admin;
 use App\Client\ClientLogoUploader;
 use App\Entity\Client;
 use App\Entity\EmailAlias;
+use App\Entity\HelloAssoConfig;
 use App\Entity\User;
 use App\Form\ClientInfoType;
 use App\Form\ClientSettingType;
@@ -68,10 +69,30 @@ class ClientController extends AbstractController
     {
         $page = $request->query->getInt('page', 1);
 
+        // "Deletable" requires the form to already be inactive (a safety net against
+        // deleting a form that's still live), to have no payment history (which is
+        // permanent and makes deletion pointless to even offer), and not to be the
+        // client's primary form (never deletable, regardless of history — see
+        // Client::getPrimaryHelloAssoConfig()). The "not the last form" rule is
+        // situational (add another first) so, like the deactivate guard above it,
+        // it's enforced server-side with a flash error rather than hidden.
+        $primaryHelloAssoConfig = $client->getPrimaryHelloAssoConfig();
+        $deletableHelloAssoConfigIds = [];
+        foreach ($client->getHelloAssoConfigs() as $haConfig) {
+            if ($haConfig !== $primaryHelloAssoConfig
+                && !$haConfig->isActive()
+                && !$this->paymentRepository->hasAnyForHelloAssoConfig($haConfig)
+            ) {
+                $deletableHelloAssoConfigIds[] = $haConfig->getId();
+            }
+        }
+
         return $this->render('admin/client/show.html.twig', [
             'client' => $client,
             'usersPagination' => $this->userRepository->paginateByClient($client, $page, self::USERS_PER_PAGE),
             'emailAliases' => $this->emailAliasRepository->findAllForClient($client),
+            'deletableHelloAssoConfigIds' => $deletableHelloAssoConfigIds,
+            'primaryHelloAssoConfigId' => $primaryHelloAssoConfig?->getId(),
         ]);
     }
 
@@ -308,6 +329,7 @@ class ClientController extends AbstractController
         if ($form->isSubmitted() && $form->isValid()) {
             $secret = $form->get('clientSecret')->getData() ?: $this->wizardState->helloAssoSecret();
             $this->wizardState->set('helloAsso', [
+                'label' => $config->getLabel(),
                 'apiUrl' => $config->getApiUrl(),
                 'helloAssoClientId' => $config->getHelloAssoClientId(),
                 'clientSecret' => $secret,
@@ -376,7 +398,7 @@ class ClientController extends AbstractController
             $cyclosConfig = $this->wizardState->cyclosConfig();
             $cyclosConfig->setPasswordEncrypted($this->secretEncryptor->encrypt($this->wizardState->cyclosPassword()));
 
-            $client->setHelloAssoConfig($helloAssoConfig);
+            $client->addHelloAssoConfig($helloAssoConfig);
             $client->setCyclosConfig($cyclosConfig);
             $client->setSetting($setting);
 
@@ -424,10 +446,57 @@ class ClientController extends AbstractController
         ]);
     }
 
-    #[Route(path: '/{id}/helloasso', requirements: ['id' => '\d+'], name: 'edit_helloasso', methods: ['GET', 'POST'])]
-    public function editHelloAsso(Client $client, Request $request): Response
+    #[Route(path: '/{id}/helloasso/new', requirements: ['id' => '\d+'], name: 'new_helloasso_config', methods: ['GET', 'POST'])]
+    public function newHelloAssoConfig(Client $client, Request $request): Response
     {
-        $config = $client->getHelloAssoConfig();
+        $sourceConfig = $client->getPrimaryHelloAssoConfig();
+
+        $config = new HelloAssoConfig();
+        if ($sourceConfig !== null) {
+            // Same HelloAsso organization, most likely the same OAuth2 app too — prefill
+            // from the client's existing config so adding a 2nd/3rd form doesn't force
+            // re-typing shared credentials (and risking a typo that silently breaks one
+            // of the two forms). Every field stays editable for the rare client that
+            // genuinely needs a different account.
+            $config->setApiUrl($sourceConfig->getApiUrl());
+            $config->setHelloAssoClientId($sourceConfig->getHelloAssoClientId());
+            $config->setOrganizationSlug($sourceConfig->getOrganizationSlug());
+        }
+
+        $form = $this->createForm(HelloAssoConfigType::class, $config, [
+            'secret_required' => $sourceConfig === null,
+            'secret_help' => $sourceConfig !== null ? 'Laisser vide pour réutiliser le secret du premier formulaire HelloAsso de ce client.' : null,
+        ]);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $secret = $form->get('clientSecret')->getData();
+            if ($secret !== null && $secret !== '') {
+                $config->setClientSecretEncrypted($this->secretEncryptor->encrypt($secret));
+            } elseif ($sourceConfig !== null) {
+                $config->setClientSecretEncrypted($sourceConfig->getClientSecretEncrypted());
+            }
+
+            $client->addHelloAssoConfig($config);
+
+            $this->entityManager->persist($config);
+            $this->entityManager->flush();
+            $this->addFlash('success', sprintf('Le formulaire HelloAsso "%s" a été ajouté.', $config->getLabel()));
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        return $this->render('admin/client/new_helloasso.html.twig', [
+            'client' => $client,
+            'form' => $form,
+            'prefilled' => $sourceConfig !== null,
+        ]);
+    }
+
+    #[Route(path: '/{id}/helloasso/{configId}', requirements: ['id' => '\d+', 'configId' => '\d+'], name: 'edit_helloasso_config', methods: ['GET', 'POST'])]
+    public function editHelloAssoConfig(Client $client, int $configId, Request $request): Response
+    {
+        $config = $this->getClientHelloAssoConfigOrNotFound($client, $configId);
         $form = $this->createForm(HelloAssoConfigType::class, $config, ['secret_required' => false]);
         $form->handleRequest($request);
 
@@ -442,11 +511,83 @@ class ClientController extends AbstractController
             return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
         }
 
-        return $this->render('admin/client/edit_section.html.twig', [
+        return $this->render('admin/client/edit_helloasso.html.twig', [
             'client' => $client,
+            'config' => $config,
             'form' => $form,
-            'section_title' => 'HelloAsso',
         ]);
+    }
+
+    #[Route(path: '/{id}/helloasso/{configId}/statut', requirements: ['id' => '\d+', 'configId' => '\d+'], name: 'toggle_helloasso_config', methods: ['POST'])]
+    public function toggleHelloAssoConfig(Client $client, int $configId, Request $request): Response
+    {
+        $config = $this->getClientHelloAssoConfigOrNotFound($client, $configId);
+
+        if (!$this->isCsrfTokenValid('toggle_helloasso_config_' . $config->getId(), $request->request->get('_token'))) {
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        if ($config->isActive() && \count($client->getActiveHelloAssoConfigs()) <= 1) {
+            $this->addFlash('error', 'Impossible de désactiver le dernier formulaire HelloAsso actif du client.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        $config->setActive(!$config->isActive());
+        $this->entityManager->flush();
+        $this->addFlash('success', sprintf('Le formulaire "%s" a été %s.', $config->getLabel(), $config->isActive() ? 'réactivé' : 'désactivé'));
+
+        return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+    }
+
+    #[Route(path: '/{id}/helloasso/{configId}/supprimer', requirements: ['id' => '\d+', 'configId' => '\d+'], name: 'delete_helloasso_config', methods: ['POST'])]
+    public function deleteHelloAssoConfig(Client $client, int $configId, Request $request): Response
+    {
+        $config = $this->getClientHelloAssoConfigOrNotFound($client, $configId);
+
+        if (!$this->isCsrfTokenValid('delete_helloasso_config_' . $config->getId(), $request->request->get('_token'))) {
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        if ($config === $client->getPrimaryHelloAssoConfig()) {
+            $this->addFlash('error', 'Le formulaire principal d\'un client ne peut pas être supprimé, seulement désactivé.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        if ($config->isActive()) {
+            $this->addFlash('error', 'Désactivez ce formulaire avant de pouvoir le supprimer.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        if ($this->paymentRepository->hasAnyForHelloAssoConfig($config)) {
+            $this->addFlash('error', 'Ce formulaire a un historique de paiements : désactivez-le au lieu de le supprimer.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        // No separate "not the last form" check: the toggle guard above already
+        // refuses to deactivate a client's last active form, so the one form that
+        // would ever need this check can never reach the isActive() check above.
+        $label = $config->getLabel();
+        $client->removeHelloAssoConfig($config);
+        $this->entityManager->remove($config);
+        $this->entityManager->flush();
+        $this->addFlash('success', sprintf('Le formulaire "%s" a été supprimé.', $label));
+
+        return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+    }
+
+    private function getClientHelloAssoConfigOrNotFound(Client $client, int $configId): HelloAssoConfig
+    {
+        foreach ($client->getHelloAssoConfigs() as $config) {
+            if ($config->getId() === $configId) {
+                return $config;
+            }
+        }
+
+        throw $this->createNotFoundException('Formulaire HelloAsso introuvable pour ce client.');
     }
 
     #[Route(path: '/{id}/cyclos', requirements: ['id' => '\d+'], name: 'edit_cyclos', methods: ['GET', 'POST'])]

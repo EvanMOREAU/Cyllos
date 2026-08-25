@@ -3,6 +3,7 @@
 namespace App\Repository;
 
 use App\Entity\Client;
+use App\Entity\HelloAssoConfig;
 use App\Entity\Payment;
 use App\Entity\PaymentStatus;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
@@ -27,6 +28,15 @@ class PaymentRepository extends ServiceEntityRepository
     }
 
     /**
+     * Whether any payment references this config — a config with history can
+     * only be deactivated, never deleted (see ClientController::deleteHelloAssoConfig()).
+     */
+    public function hasAnyForHelloAssoConfig(HelloAssoConfig $config): bool
+    {
+        return $this->count(['helloAssoConfig' => $config]) > 0;
+    }
+
+    /**
      * @return Payment[]
      */
     public function findAllForClient(Client $client): array
@@ -41,9 +51,9 @@ class PaymentRepository extends ServiceEntityRepository
 
     /**
      * Paginated payment list, optionally scoped to a client and/or a set of
-     * statuses, with the Client relation eager-loaded to avoid an N+1 query
-     * per row when the list displays the client name (admin cross-client
-     * view).
+     * statuses, with the Client and HelloAssoConfig relations eager-loaded to
+     * avoid an N+1 query per row when the list displays the client name and
+     * form label (admin cross-client view).
      *
      * @param PaymentStatus[] $statuses
      * @return array{items: Payment[], total: int, page: int, perPage: int, pageCount: int}
@@ -55,6 +65,8 @@ class PaymentRepository extends ServiceEntityRepository
         $qb = $this->createQueryBuilder('p')
             ->leftJoin('p.client', 'c')
             ->addSelect('c')
+            ->leftJoin('p.helloAssoConfig', 'hac')
+            ->addSelect('hac')
             ->orderBy('p.paymentDate', 'DESC');
 
         if ($client !== null) {
