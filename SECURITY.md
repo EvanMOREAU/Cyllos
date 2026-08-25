@@ -58,8 +58,8 @@ ouvert à des tests d'intrusion non sollicités.
 - Réinitialisation de mot de passe en libre-service réservée aux comptes
   clients — jamais aux comptes admin/développeur/CEO, qui doivent être
   réinitialisés manuellement par un développeur ou le CEO.
-- Protection CSRF (double-soumission sans état) sur les formulaires
-  sensibles et l'authentification.
+- Protection CSRF (jeton par session, `Symfony\Component\Security\Csrf`) sur
+  les formulaires sensibles et l'authentification.
 - Un journal d'audit (`ActivityLog`) trace les modifications d'entités
   sensibles, les connexions, et les appels API sortants — avec exclusion
   explicite des champs contenant des secrets ou des identifiants OAuth2.

@@ -1,7 +1,7 @@
 {% extends 'base.html.twig' %}
 
 {% block title %}Nouveau client - Cyllos{% endblock %}
-{% block content_width %}content--narrow{% endblock %}
+{% block content_width %}content--full{% endblock %}
 
 {% block breadcrumb %}<div class="topbar__crumb"><a href="{{ path('admin_client_list') }}">Clients</a> / Nouveau</div>{% endblock %}
 {% block page_title %}Nouveau client{% endblock %}
@@ -13,10 +13,12 @@
         {{ form_start(form) }}
             <div class="field-group" data-controller="slug">
                 <h2 style="font-size:1rem;margin-bottom:1.1rem;">Qui est ce client ?</h2>
-                {{ form_row(form.name, {attr: {'data-slug-target': 'source', 'data-action': 'input->slug#sync'}}) }}
-                {{ form_row(form.slug, {attr: {'data-slug-target': 'slug', 'data-action': 'input->slug#lock'}}) }}
-                {{ form_row(form.contactEmail) }}
-                {{ form_row(form.active) }}
+                <div class="form-grid form-grid--wide">
+                    {{ form_row(form.name, {attr: {'data-slug-target': 'source', 'data-action': 'input->slug#sync'}}) }}
+                    {{ form_row(form.slug, {attr: {'data-slug-target': 'slug', 'data-action': 'input->slug#lock'}}) }}
+                    {{ form_row(form.contactEmail) }}
+                    {{ form_row(form.active) }}
+                </div>
             </div>
             <div class="form-footer">
                 <a class="btn btn--ghost" href="{{ path('admin_client_list') }}">Annuler</a>

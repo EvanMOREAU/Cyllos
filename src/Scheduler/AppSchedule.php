@@ -26,8 +26,8 @@ class AppSchedule implements ScheduleProviderInterface
     {
         return (new Schedule())
             ->with(
-                RecurringMessage::cron('* * * * *', new RunCommandMessage('app:helloasso:fetch')),# fetch toutes les minutes à la place de toutes les 15m : '*/15 * * * *'
-                RecurringMessage::cron('0 3 * * *', new RunCommandMessage('app:payments:purge')),
+                RecurringMessage::cron('*/10 * * * *', new RunCommandMessage('app:helloasso:fetch')),# fetch toutes les minutes à la place de toutes les 15m : '*/15 * * * *'
+                RecurringMessage::cron('0 */6 * * *', new RunCommandMessage('app:payments:purge')), # Supprimer les paiements crédités toutes les 6h
             )
             ->stateful($this->scheduleCache);
     }

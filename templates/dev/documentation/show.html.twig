@@ -872,6 +872,7 @@ public function record(
                 <li><code>composer install --no-interaction</code></li>
                 <li><code>doctrine:migrations:migrate --no-interaction</code></li>
                 <li><code>cache:clear --no-interaction</code></li>
+                <li><code>asset-map:compile --no-interaction</code></li>
             </ol>
             <p>
                 Chaque étape est exécutée via <code>Symfony\Component\Process\Process</code> ; à la
@@ -1018,6 +1019,103 @@ public function record(
                 Un test de non-régression (<code>CyclosClientHasAlreadyCreditedPaymentTest</code>)
                 rejoue exactement la réponse JSON observée sur l'instance réelle, description
                 correspondante en 2<sup>e</sup> position plutôt qu'en 1<sup>re</sup>.
+            </p>
+            <h3>Déploiement : nouveaux fichiers JS/CSS invisibles en prod (asset-map:compile manquant)</h3>
+            <p>
+                Signalé en production juste après le déploiement du support multi-formulaires
+                HelloAsso : le menu déroulant "Libellé" s'affichait vide et sans style (juste un
+                cadre), et la mise en page d'une carte formulaire était cassée (bouton et icône
+                empilés au lieu d'être côte à côte). Aucune erreur visible, pas de 500 — juste des
+                éléments d'interface qui semblaient ne jamais s'initialiser.
+            </p>
+            <p>
+                Cause : <code>DeploymentRunner::run()</code> (et la procédure manuelle documentée)
+                n'exécutaient jamais <code>asset-map:compile</code> après un <code>git pull</code> —
+                seulement <code>cache:clear</code>. En développement (AssetMapper en mode dev), les
+                fichiers sont servis directement depuis <code>assets/</code>, donc ce n'est jamais un
+                problème. En production, AssetMapper sert des fichiers compilés dans
+                <code>public/assets/</code> à partir d'un manifeste généré par
+                <code>asset-map:compile</code> — un fichier JS/CSS dont le <strong>contenu</strong>
+                change dans un fichier déjà connu du manifeste continue souvent à fonctionner après
+                un simple <code>cache:clear</code>, ce qui a masqué le problème jusqu'ici. Mais un
+                fichier <strong>nouveau</strong> (ici les contrôleurs Stimulus
+                <code>dropdown_controller.js</code> et <code>helloasso_label_controller.js</code>,
+                les premiers fichiers JS entièrement nouveaux livrés depuis la mise en place du
+                projet) est absent du manifeste tant qu'il n'a pas été recompilé — le navigateur ne
+                le charge jamais, silencieusement.
+            </p>
+            <p>
+                Corrigé en ajoutant <code>asset-map:compile --no-interaction</code> comme 5<sup>e</sup>
+                étape de <code>DeploymentRunner::run()</code>, et dans la procédure manuelle
+                (<code>docs/DEPLOIEMENT_DEBIAN13.md</code>, section "Mises à jour ultérieures"). Pas
+                de test automatisé possible ici (comportement spécifique à
+                <code>APP_ENV=prod</code>, absent de la suite de tests) — seule la checklist de
+                déploiement protège contre une régression.
+            </p>
+            <h3>Connexions refusées de façon aléatoire ("Identifiants invalides") : downgrade CSRF bloqué</h3>
+            <p>
+                Plusieurs comptes de test, avec des mots de passe vérifiés corrects, échouaient de
+                façon répétée à se connecter avec le message générique "Identifiants invalides" —
+                y compris pour un utilisateur humain, pas seulement lors de tests automatisés.
+                <code>var/log/dev.log</code> a révélé la vraie cause :
+                <code>InvalidCsrfTokenException</code> avec le message "CSRF validation failed:
+                double-submit info was used in a previous request but is now missing".
+            </p>
+            <p>
+                <code>config/packages/csrf.yaml</code> activait la protection CSRF "stateless" de
+                Symfony (<code>SameOriginCsrfTokenManager</code>) pour les jetons
+                <code>submit</code>/<code>authenticate</code>/<code>logout</code>. Ce mécanisme valide
+                une requête via un cookie à double soumission ET/OU les en-têtes
+                <code>Origin</code>/<code>Referer</code>/<code>Sec-Fetch-Site</code>, et mémorise en
+                session la méthode qui a réussi sur la requête précédente. Si cette méthode précise
+                n'est plus valide sur la requête suivante (cookie perdu entre le GET du formulaire et
+                le POST, en-tête filtré par le navigateur), Symfony refuse explicitement la requête —
+                par conception, pour empêcher un downgrade vers une méthode de validation plus
+                faible — plutôt que de retomber sur l'autre méthode disponible.
+            </p>
+            <p>
+                Cette protection n'apportait aucun bénéfice ici : Cyllos est une application
+                entièrement basée sur la session serveur (pas d'API stateless à rendre
+                cache-friendly), donc son seul effet concret était de rendre chaque connexion et
+                chaque soumission de formulaire fragile au moindre aléa de cookie ou d'en-tête.
+                Corrigé en retirant <code>csrf_protection.stateless_token_ids</code> de
+                <code>config/packages/csrf.yaml</code>, ce qui fait retomber Symfony sur son
+                gestionnaire de jetons CSRF classique basé sur la session — la protection reste
+                pleinement effective, simplement sans la fragilité du double-submit.
+            </p>
+            <p>
+                Ce correctif a révélé un <strong>second bug, plus sérieux</strong>, resté invisible
+                jusque-là : la 4<sup>e</sup> étape de l'assistant de création de client (Réglages)
+                renvoyait systématiquement une erreur 422 "The CSRF token is invalid" à la
+                soumission, avec un jeton <strong>vide</strong> (<code>value: ""</code>) dans le
+                détail de l'erreur. En cause,
+                <code>templates/admin/client/wizard/reglages.html.twig</code> : le formulaire
+                appelait <code>form_end(form, {render_rest: false})</code> sans jamais appeler
+                <code>form_rest(form)</code> ni rendre le champ <code>_token</code> explicitement —
+                contrairement à <code>edit_helloasso.html.twig</code> et
+                <code>edit_section.html.twig</code>, qui utilisent le même motif mais avec un
+                <code>form_rest(form)</code>/<code>form_widget(form)</code> correspondant. Le champ
+                CSRF caché n'était donc tout simplement jamais présent dans le HTML envoyé au
+                navigateur.
+            </p>
+            <p>
+                Ce bug existait déjà avant ce chapitre et empêchait silencieusement toute création
+                de nouveau client — mais l'ancienne protection CSRF stateless le masquait
+                entièrement : son <code>SameOriginCsrfTokenManager</code> valide une requête sur la
+                seule base de l'en-tête <code>Origin</code>/<code>Referer</code> quand elle prouve
+                une origine identique, sans jamais exiger que le jeton soumis corresponde
+                réellement à quoi que ce soit. Un champ <code>_token</code> absent (donc vide) ne
+                posait donc aucun problème tant que cette validation par origine suffisait. Revenir
+                au gestionnaire de jetons classique — strict par nature — a rendu ce bug visible en
+                le rejetant, ce qui est le comportement correct.
+            </p>
+            <p>
+                Corrigé en ajoutant <code>{{ form_rest(form) }}</code> dans
+                <code>reglages.html.twig</code>. Couvert par un nouveau test fonctionnel,
+                <code>tests/Functional/ClientWizardTest.php</code>, qui parcourt les 4 étapes de
+                l'assistant en soumettant à chaque fois le vrai formulaire crawlé (jamais un jeton
+                CSRF fabriqué) — confirmé qu'il échoue bien contre le template cassé avant d'être
+                validé contre le correctif, avant d'être intégré à la suite.
             </p>
         </section>
 

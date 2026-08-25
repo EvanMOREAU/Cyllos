@@ -1471,6 +1471,14 @@ tbody tr:hover {
     grid-column: 1 / -1;
 }
 
+/* For a form-grid meant to use the full page width (content--full) — fixed
+   2 columns would stretch a short field (e.g. a number input) to 600px+ on a
+   wide screen. Reflows into as many columns as fit instead, same pattern as
+   .summary-grid. */
+.form-grid--wide {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
 .form-row.is-hidden {
     display: none;
 }
