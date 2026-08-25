@@ -465,8 +465,18 @@ sudo -u cyllos git pull --ff-only
 sudo -u cyllos composer install --no-dev --optimize-autoloader --no-interaction
 sudo -u cyllos php bin/console doctrine:migrations:migrate --no-interaction --env=prod
 sudo -u cyllos php bin/console cache:clear --env=prod
+sudo -u cyllos php bin/console asset-map:compile --env=prod
 sudo systemctl restart php8.4-fpm cyllos-scheduler
 ```
+
+**Ne saute pas l'étape `asset-map:compile`**, même si elle paraît redondante avec
+`cache:clear` : sans elle, un déploiement qui ajoute un **nouveau** fichier
+JS/CSS (un nouveau contrôleur Stimulus, par exemple) laisse la prod servir
+l'ancien manifeste d'assets, qui ignore l'existence du nouveau fichier — la
+fonctionnalité correspondante reste cassée silencieusement (pas d'erreur
+visible, juste un élément d'interface qui ne s'initialise jamais) jusqu'à ce
+que cette commande soit lancée manuellement. Voir "Incidents résolus" dans la
+documentation (`/dev/documentation`).
 
 ---
 
@@ -479,3 +489,4 @@ sudo systemctl restart php8.4-fpm cyllos-scheduler
 | "APP_ENCRYPTION_KEY must be..." | Clé absente ou mal copiée dans `.env.local` | Regénérer avec `app:generate-encryption-key` |
 | Rattrapage HelloAsso ne se déclenche jamais | Worker Scheduler arrêté | `sudo systemctl status cyllos-scheduler` |
 | Permission denied sur les fichiers uploadés | Mauvais propriétaire sur `var/`/`public/uploads` | `sudo chown -R cyllos:cyllos /var/www/cyllos/var /var/www/cyllos/public/uploads` |
+| Un élément d'interface récemment ajouté ne s'affiche pas (vide, sans style, JS inactif), sans erreur visible | `asset-map:compile` pas relancé après un déploiement qui ajoute un nouveau fichier JS/CSS | `sudo -u cyllos php bin/console asset-map:compile --env=prod` |

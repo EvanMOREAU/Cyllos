@@ -38,6 +38,12 @@ class DeploymentRunner
             ['label' => 'Installation des dépendances (composer install)', 'command' => ['composer', 'install', '--no-interaction']],
             ['label' => 'Application des migrations', 'command' => ['php', 'bin/console', 'doctrine:migrations:migrate', '--no-interaction']],
             ['label' => 'Vidage du cache', 'command' => ['php', 'bin/console', 'cache:clear', '--no-interaction']],
+            // Recompile AssetMapper's manifest — without this, a deploy that ships a
+            // *new* JS/CSS file leaves prod silently serving the old manifest, which
+            // doesn't know the new file exists (a changed existing file mostly still
+            // works via cache:clear alone, which is why this went unnoticed until the
+            // first PR to add brand new controllers). See "Incidents résolus".
+            ['label' => 'Compilation des assets (AssetMapper)', 'command' => ['php', 'bin/console', 'asset-map:compile', '--no-interaction']],
         ];
 
         $results = [];

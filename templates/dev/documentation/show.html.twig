@@ -872,6 +872,7 @@ public function record(
                 <li><code>composer install --no-interaction</code></li>
                 <li><code>doctrine:migrations:migrate --no-interaction</code></li>
                 <li><code>cache:clear --no-interaction</code></li>
+                <li><code>asset-map:compile --no-interaction</code></li>
             </ol>
             <p>
                 Chaque étape est exécutée via <code>Symfony\Component\Process\Process</code> ; à la
@@ -1018,6 +1019,38 @@ public function record(
                 Un test de non-régression (<code>CyclosClientHasAlreadyCreditedPaymentTest</code>)
                 rejoue exactement la réponse JSON observée sur l'instance réelle, description
                 correspondante en 2<sup>e</sup> position plutôt qu'en 1<sup>re</sup>.
+            </p>
+            <h3>Déploiement : nouveaux fichiers JS/CSS invisibles en prod (asset-map:compile manquant)</h3>
+            <p>
+                Signalé en production juste après le déploiement du support multi-formulaires
+                HelloAsso : le menu déroulant "Libellé" s'affichait vide et sans style (juste un
+                cadre), et la mise en page d'une carte formulaire était cassée (bouton et icône
+                empilés au lieu d'être côte à côte). Aucune erreur visible, pas de 500 — juste des
+                éléments d'interface qui semblaient ne jamais s'initialiser.
+            </p>
+            <p>
+                Cause : <code>DeploymentRunner::run()</code> (et la procédure manuelle documentée)
+                n'exécutaient jamais <code>asset-map:compile</code> après un <code>git pull</code> —
+                seulement <code>cache:clear</code>. En développement (AssetMapper en mode dev), les
+                fichiers sont servis directement depuis <code>assets/</code>, donc ce n'est jamais un
+                problème. En production, AssetMapper sert des fichiers compilés dans
+                <code>public/assets/</code> à partir d'un manifeste généré par
+                <code>asset-map:compile</code> — un fichier JS/CSS dont le <strong>contenu</strong>
+                change dans un fichier déjà connu du manifeste continue souvent à fonctionner après
+                un simple <code>cache:clear</code>, ce qui a masqué le problème jusqu'ici. Mais un
+                fichier <strong>nouveau</strong> (ici les contrôleurs Stimulus
+                <code>dropdown_controller.js</code> et <code>helloasso_label_controller.js</code>,
+                les premiers fichiers JS entièrement nouveaux livrés depuis la mise en place du
+                projet) est absent du manifeste tant qu'il n'a pas été recompilé — le navigateur ne
+                le charge jamais, silencieusement.
+            </p>
+            <p>
+                Corrigé en ajoutant <code>asset-map:compile --no-interaction</code> comme 5<sup>e</sup>
+                étape de <code>DeploymentRunner::run()</code>, et dans la procédure manuelle
+                (<code>docs/DEPLOIEMENT_DEBIAN13.md</code>, section "Mises à jour ultérieures"). Pas
+                de test automatisé possible ici (comportement spécifique à
+                <code>APP_ENV=prod</code>, absent de la suite de tests) — seule la checklist de
+                déploiement protège contre une régression.
             </p>
         </section>
 
