@@ -49,22 +49,43 @@
             </div>
         </div>
 
-        <div class="summary-card">
-            <div class="summary-card__header">
-                <div class="summary-card__title">
-                    <span class="summary-card__icon">{{ icons.render('inbox') }}</span>
-                    HelloAsso
+        {% for haConfig in client.helloAssoConfigs %}
+            <div class="summary-card">
+                <div class="summary-card__header">
+                    <div class="summary-card__title">
+                        <span class="summary-card__icon">{{ icons.render('inbox') }}</span>
+                        <span class="summary-card__title-stack">
+                            <span class="summary-card__title-eyebrow">HelloAsso</span>
+                            <span>
+                                {{ haConfig.label }}
+                                {% if not haConfig.active %}
+                                    <span class="status-pill"><span class="dot dot--inactive"></span> Désactivé</span>
+                                {% endif %}
+                            </span>
+                        </span>
+                    </div>
+                    <a class="btn btn--ghost btn--sm" href="{{ path('admin_client_edit_helloasso_config', {id: client.id, configId: haConfig.id}) }}">Modifier</a>
                 </div>
-                <a class="btn btn--ghost btn--sm" href="{{ path('admin_client_edit_helloasso', {id: client.id}) }}">Modifier</a>
+                <div class="summary-card__body">
+                    <dl class="kv-list">
+                        <div class="kv-row"><dt>Organisation</dt><dd>{{ haConfig.organizationSlug }}</dd></div>
+                        <div class="kv-row"><dt>Type de formulaire</dt><dd>{{ haConfig.formType }}</dd></div>
+                        <div class="kv-row"><dt>Formulaire</dt><dd>{{ haConfig.formSlug }}</dd></div>
+                        <div class="kv-row"><dt>Client ID</dt><dd><code>{{ haConfig.helloAssoClientId }}</code></dd></div>
+                        <div class="kv-row"><dt>Montant max</dt><dd>{{ haConfig.maxAmount }} €</dd></div>
+                    </dl>
+                    <form method="post" action="{{ path('admin_client_toggle_helloasso_config', {id: client.id, configId: haConfig.id}) }}" class="summary-card__footer-action" data-confirm-title="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }} le formulaire" data-confirm-message="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }} le formulaire \"{{ haConfig.label }}\" ?" data-confirm-confirm-label="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }}">
+                        <input type="hidden" name="_token" value="{{ csrf_token('toggle_helloasso_config_' ~ haConfig.id) }}">
+                        <button class="btn btn--ghost btn--sm" type="submit">{{ icons.render(haConfig.active ? 'x' : 'check') }} {{ haConfig.active ? 'Désactiver' : 'Réactiver' }}</button>
+                    </form>
+                </div>
             </div>
-            <div class="summary-card__body">
-                <dl class="kv-list">
-                    <div class="kv-row"><dt>Organisation</dt><dd>{{ client.helloAssoConfig.organizationSlug }}</dd></div>
-                    <div class="kv-row"><dt>Type de formulaire</dt><dd>{{ client.helloAssoConfig.formType }}</dd></div>
-                    <div class="kv-row"><dt>Formulaire</dt><dd>{{ client.helloAssoConfig.formSlug }}</dd></div>
-                    <div class="kv-row"><dt>Client ID</dt><dd><code>{{ client.helloAssoConfig.helloAssoClientId }}</code></dd></div>
-                    <div class="kv-row"><dt>Montant max</dt><dd>{{ client.helloAssoConfig.maxAmount }} €</dd></div>
-                </dl>
+        {% endfor %}
+
+        <div class="summary-card summary-card--add">
+            <div class="summary-card__body summary-card__body--center">
+                <p class="text-muted text-sm">Un formulaire distinct pour un autre public (ex. professionnels) ?</p>
+                <a class="btn btn--secondary btn--sm" href="{{ path('admin_client_new_helloasso_config', {id: client.id}) }}">{{ icons.render('plus') }} Ajouter un formulaire HelloAsso</a>
             </div>
         </div>
 

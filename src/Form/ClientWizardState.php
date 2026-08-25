@@ -57,6 +57,7 @@ class ClientWizardState
     {
         $config = new HelloAssoConfig();
         $data = $this->all()['helloAsso'] ?? [];
+        $config->setLabel($data['label'] ?? '');
         if (isset($data['apiUrl'])) {
             $config->setApiUrl($data['apiUrl']);
         }

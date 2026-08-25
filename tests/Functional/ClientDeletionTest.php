@@ -48,14 +48,16 @@ class ClientDeletionTest extends WebTestCase
 
         $client = (new Client())->setName('Delete Me')->setSlug('delete-me')->setActive(false);
 
-        $client->setHelloAssoConfig((new HelloAssoConfig())
+        $haConfig = (new HelloAssoConfig())
+            ->setLabel('Particuliers')
             ->setApiUrl('https://api.helloasso.example/')
             ->setHelloAssoClientId('id')
             ->setClientSecretEncrypted($encryptor->encrypt('secret'))
             ->setOrganizationSlug('org')
             ->setFormSlug('form')
             ->setMaxAmount(250)
-            ->setFetchNbDays(5));
+            ->setFetchNbDays(5);
+        $client->addHelloAssoConfig($haConfig);
 
         $client->setCyclosConfig((new CyclosConfig())
             ->setBaseUrl('https://cyclos.example/api/')
@@ -75,6 +77,7 @@ class ClientDeletionTest extends WebTestCase
 
         $payment = new Payment(
             client: $client,
+            helloAssoConfig: $haConfig,
             helloAssoPaymentId: 1,
             paymentDate: new \DateTimeImmutable(),
             amount: 10.0,

@@ -5,6 +5,7 @@ namespace App\Controller\Admin;
 use App\Client\ClientLogoUploader;
 use App\Entity\Client;
 use App\Entity\EmailAlias;
+use App\Entity\HelloAssoConfig;
 use App\Entity\User;
 use App\Form\ClientInfoType;
 use App\Form\ClientSettingType;
@@ -308,6 +309,7 @@ class ClientController extends AbstractController
         if ($form->isSubmitted() && $form->isValid()) {
             $secret = $form->get('clientSecret')->getData() ?: $this->wizardState->helloAssoSecret();
             $this->wizardState->set('helloAsso', [
+                'label' => $config->getLabel(),
                 'apiUrl' => $config->getApiUrl(),
                 'helloAssoClientId' => $config->getHelloAssoClientId(),
                 'clientSecret' => $secret,
@@ -376,7 +378,7 @@ class ClientController extends AbstractController
             $cyclosConfig = $this->wizardState->cyclosConfig();
             $cyclosConfig->setPasswordEncrypted($this->secretEncryptor->encrypt($this->wizardState->cyclosPassword()));
 
-            $client->setHelloAssoConfig($helloAssoConfig);
+            $client->addHelloAssoConfig($helloAssoConfig);
             $client->setCyclosConfig($cyclosConfig);
             $client->setSetting($setting);
 
@@ -424,10 +426,34 @@ class ClientController extends AbstractController
         ]);
     }
 
-    #[Route(path: '/{id}/helloasso', requirements: ['id' => '\d+'], name: 'edit_helloasso', methods: ['GET', 'POST'])]
-    public function editHelloAsso(Client $client, Request $request): Response
+    #[Route(path: '/{id}/helloasso/new', requirements: ['id' => '\d+'], name: 'new_helloasso_config', methods: ['GET', 'POST'])]
+    public function newHelloAssoConfig(Client $client, Request $request): Response
     {
-        $config = $client->getHelloAssoConfig();
+        $config = new HelloAssoConfig();
+        $form = $this->createForm(HelloAssoConfigType::class, $config, ['secret_required' => true]);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $config->setClientSecretEncrypted($this->secretEncryptor->encrypt($form->get('clientSecret')->getData()));
+            $client->addHelloAssoConfig($config);
+
+            $this->entityManager->persist($config);
+            $this->entityManager->flush();
+            $this->addFlash('success', sprintf('Le formulaire HelloAsso "%s" a été ajouté.', $config->getLabel()));
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        return $this->render('admin/client/new_helloasso.html.twig', [
+            'client' => $client,
+            'form' => $form,
+        ]);
+    }
+
+    #[Route(path: '/{id}/helloasso/{configId}', requirements: ['id' => '\d+', 'configId' => '\d+'], name: 'edit_helloasso_config', methods: ['GET', 'POST'])]
+    public function editHelloAssoConfig(Client $client, int $configId, Request $request): Response
+    {
+        $config = $this->getClientHelloAssoConfigOrNotFound($client, $configId);
         $form = $this->createForm(HelloAssoConfigType::class, $config, ['secret_required' => false]);
         $form->handleRequest($request);
 
@@ -442,11 +468,44 @@ class ClientController extends AbstractController
             return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
         }
 
-        return $this->render('admin/client/edit_section.html.twig', [
+        return $this->render('admin/client/edit_helloasso.html.twig', [
             'client' => $client,
+            'config' => $config,
             'form' => $form,
-            'section_title' => 'HelloAsso',
         ]);
+    }
+
+    #[Route(path: '/{id}/helloasso/{configId}/statut', requirements: ['id' => '\d+', 'configId' => '\d+'], name: 'toggle_helloasso_config', methods: ['POST'])]
+    public function toggleHelloAssoConfig(Client $client, int $configId, Request $request): Response
+    {
+        $config = $this->getClientHelloAssoConfigOrNotFound($client, $configId);
+
+        if (!$this->isCsrfTokenValid('toggle_helloasso_config_' . $config->getId(), $request->request->get('_token'))) {
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        if ($config->isActive() && \count($client->getActiveHelloAssoConfigs()) <= 1) {
+            $this->addFlash('error', 'Impossible de désactiver le dernier formulaire HelloAsso actif du client.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        $config->setActive(!$config->isActive());
+        $this->entityManager->flush();
+        $this->addFlash('success', sprintf('Le formulaire "%s" a été %s.', $config->getLabel(), $config->isActive() ? 'réactivé' : 'désactivé'));
+
+        return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+    }
+
+    private function getClientHelloAssoConfigOrNotFound(Client $client, int $configId): HelloAssoConfig
+    {
+        foreach ($client->getHelloAssoConfigs() as $config) {
+            if ($config->getId() === $configId) {
+                return $config;
+            }
+        }
+
+        throw $this->createNotFoundException('Formulaire HelloAsso introuvable pour ce client.');
     }
 
     #[Route(path: '/{id}/cyclos', requirements: ['id' => '\d+'], name: 'edit_cyclos', methods: ['GET', 'POST'])]

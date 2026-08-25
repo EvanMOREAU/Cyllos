@@ -1,0 +1,24 @@
+{% import 'components/icons.html.twig' as icons %}
+{# Dropdown (Particuliers / Professionnels) with a checkbox escape hatch to a
+   free-text label — see HelloAssoConfigType::LABEL_CHOICES. The dropdown
+   itself is a styled skin (assets/controllers/dropdown_controller.js, same
+   component as the payment list's client/status filters) over the real
+   <select>, kept as the source of truth for validation and submission but
+   visually hidden. #}
+<div class="form-grid" data-controller="helloasso-label">
+    <div class="form-row">
+        {{ form_label(form.labelChoice) }}
+        <div class="dropdown dropdown--field" data-controller="dropdown" data-action="click@window->dropdown#closeOnClickOutside keydown@window->dropdown#closeOnEscape">
+            <button type="button" class="dropdown__trigger" data-dropdown-target="trigger" data-action="dropdown#toggle" aria-haspopup="listbox" aria-expanded="false">
+                <span data-dropdown-target="label"></span>
+                {{ icons.render('chevron-right', 'style="transform:rotate(90deg)"') }}
+            </button>
+            <div class="dropdown__menu" data-dropdown-target="menu"></div>
+            {{ form_widget(form.labelChoice, {attr: {'data-dropdown-target': 'select', 'data-helloasso-label-target': 'choice', hidden: 'hidden'}}) }}
+        </div>
+        {{ form_errors(form.labelChoice) }}
+        {{ form_help(form.labelChoice) }}
+    </div>
+    {{ form_row(form.labelCustom, {attr: {'data-helloasso-label-target': 'custom', placeholder: 'ex. Bénévoles'}, row_attr: {class: 'form-row--span2'}}) }}
+    {{ form_row(form.useCustomLabel, {attr: {'data-helloasso-label-target': 'toggle', 'data-action': 'change->helloasso-label#sync'}, row_attr: {class: 'form-row--span2'}}) }}
+</div>

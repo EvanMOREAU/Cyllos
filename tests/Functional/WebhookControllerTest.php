@@ -39,6 +39,7 @@ class WebhookControllerTest extends WebTestCase
         $client = (new Client())->setName('Test Client')->setSlug('test-client')->setActive(true);
 
         $haConfig = (new HelloAssoConfig())
+            ->setLabel('Particuliers')
             ->setApiUrl('https://api.helloasso.com/')
             ->setHelloAssoClientId('id')
             ->setClientSecretEncrypted($encryptor->encrypt('secret'))
@@ -46,7 +47,7 @@ class WebhookControllerTest extends WebTestCase
             ->setFormSlug('test-form')
             ->setMaxAmount(250)
             ->setFetchNbDays(5);
-        $client->setHelloAssoConfig($haConfig);
+        $client->addHelloAssoConfig($haConfig);
 
         $cyclosConfig = (new CyclosConfig())
             ->setBaseUrl('https://cyclos.example/api/')
@@ -68,6 +69,29 @@ class WebhookControllerTest extends WebTestCase
         $this->entityManager->flush();
 
         return $client;
+    }
+
+    private function addHelloAssoConfig(Client $client, string $formSlug, int $maxAmount = 250, bool $active = true): HelloAssoConfig
+    {
+        /** @var SecretEncryptor $encryptor */
+        $encryptor = self::getContainer()->get(SecretEncryptor::class);
+
+        $config = (new HelloAssoConfig())
+            ->setLabel('Professionnels')
+            ->setActive($active)
+            ->setApiUrl('https://api.helloasso.com/')
+            ->setHelloAssoClientId('id-' . $formSlug)
+            ->setClientSecretEncrypted($encryptor->encrypt('secret'))
+            ->setOrganizationSlug('org')
+            ->setFormSlug($formSlug)
+            ->setMaxAmount($maxAmount)
+            ->setFetchNbDays(5);
+
+        $client->addHelloAssoConfig($config);
+        $this->entityManager->persist($config);
+        $this->entityManager->flush();
+
+        return $config;
     }
 
     private function paymentPayload(array $overrides = []): array
@@ -172,5 +196,55 @@ class WebhookControllerTest extends WebTestCase
         /** @var PaymentRepository $paymentRepository */
         $paymentRepository = self::getContainer()->get(PaymentRepository::class);
         self::assertCount(1, $paymentRepository->findAllForClient($client));
+    }
+
+    /**
+     * A client with two active forms (e.g. "Particuliers"/"Professionnels")
+     * must route each webhook to the config matching the payload's formSlug —
+     * not just whichever config happens to be first. The second config here
+     * has a much lower max amount specifically so a wrong match would flip
+     * this payment to TooHigh instead of Todo.
+     */
+    public function testWebhookRoutesToTheMatchingFormWhenClientHasTwoActiveForms(): void
+    {
+        $client = $this->createTestClient();
+        $this->addHelloAssoConfig($client, 'test-form-pro', maxAmount: 10);
+
+        $this->httpClient->request(
+            'POST',
+            '/webhook/helloasso/' . $client->getSlug(),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()), // formSlug: test-form, amount: 20€
+        );
+
+        self::assertResponseIsSuccessful();
+
+        /** @var PaymentRepository $paymentRepository */
+        $paymentRepository = self::getContainer()->get(PaymentRepository::class);
+        $payment = $paymentRepository->findOneByClientAndHelloAssoId($client, 111222);
+
+        self::assertNotNull($payment);
+        self::assertSame(PaymentStatus::Todo, $payment->getStatus());
+        self::assertSame('test-form', $payment->getHelloAssoConfig()->getFormSlug());
+    }
+
+    public function testWebhookIsIgnoredForADeactivatedForm(): void
+    {
+        $client = $this->createTestClient();
+        $client->getHelloAssoConfigs()->first()->setActive(false);
+        $this->entityManager->flush();
+
+        $this->httpClient->request(
+            'POST',
+            '/webhook/helloasso/' . $client->getSlug(),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()),
+        );
+
+        self::assertResponseIsSuccessful();
+
+        /** @var PaymentRepository $paymentRepository */
+        $paymentRepository = self::getContainer()->get(PaymentRepository::class);
+        self::assertNull($paymentRepository->findOneByClientAndHelloAssoId($client, 111222));
     }
 }
