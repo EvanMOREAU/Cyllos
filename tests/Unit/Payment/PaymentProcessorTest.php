@@ -15,6 +15,7 @@ use App\Integration\HelloAsso\HelloAssoFetchedPayment;
 use App\Notification\NotificationMailer;
 use App\Payment\PaymentProcessor;
 use App\Repository\EmailAliasRepository;
+use App\Repository\HelloAssoConfigRepository;
 use App\Repository\PaymentRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\TestCase;
@@ -33,6 +34,8 @@ class PaymentProcessorTest extends TestCase
         $client = (new Client())->setName('Test')->setSlug('test')->setActive(true);
 
         $haConfig = (new HelloAssoConfig())
+            ->setLabel('Particuliers')
+            ->setActive(true)
             ->setApiUrl('https://api.helloasso.example/')
             ->setHelloAssoClientId('id')
             ->setClientSecretEncrypted('enc')
@@ -40,7 +43,7 @@ class PaymentProcessorTest extends TestCase
             ->setFormSlug('form')
             ->setMaxAmount($maxAmount)
             ->setFetchNbDays(5);
-        $client->setHelloAssoConfig($haConfig);
+        $client->addHelloAssoConfig($haConfig);
 
         $cyclosConfig = (new CyclosConfig())
             ->setBaseUrl('https://cyclos.example/api/')
@@ -80,6 +83,7 @@ class PaymentProcessorTest extends TestCase
             $entityManager,
             $paymentRepository,
             $emailAliasRepository,
+            $this->createStub(HelloAssoConfigRepository::class),
             $helloAssoClient,
             $cyclosClient,
             $mailer,
@@ -156,10 +160,16 @@ class PaymentProcessorTest extends TestCase
     {
         $client = $this->makeClient(automatic: true);
 
+        // Recent (not hardcoded) dates: PaymentProcessor::isLate() compares
+        // against the real current time, so a fixed past date eventually
+        // drifts past the 12h window and starts failing this test for
+        // unrelated reasons.
+        $recentDate = (new \DateTimeImmutable())->modify('-1 hour')->format(DATE_ATOM);
+
         $helloAssoClient = $this->createStub(HelloAssoClient::class);
         $helloAssoClient->method('fetchPaymentsHistory')->willReturn([
-            new HelloAssoFetchedPayment(444, 2000, '2026-08-19T10:00:00+02:00', 'Jean', 'Dupont', 'jean@example.com'),
-            new HelloAssoFetchedPayment(555, 3000, '2026-08-19T11:00:00+02:00', 'Marie', 'Curie', 'marie@example.com'),
+            new HelloAssoFetchedPayment(444, 2000, $recentDate, 'Jean', 'Dupont', 'jean@example.com'),
+            new HelloAssoFetchedPayment(555, 3000, $recentDate, 'Marie', 'Curie', 'marie@example.com'),
         ]);
         $helloAssoClient->method('getAlternativeEmail')->willReturn(null);
 
@@ -182,6 +192,7 @@ class PaymentProcessorTest extends TestCase
 
         $payment = new Payment(
             client: $client,
+            helloAssoConfig: $client->getHelloAssoConfigs()->first(),
             helloAssoPaymentId: 666,
             paymentDate: new \DateTimeImmutable(),
             amount: 20.0,
@@ -216,6 +227,7 @@ class PaymentProcessorTest extends TestCase
 
         $payment = new Payment(
             client: $client,
+            helloAssoConfig: $client->getHelloAssoConfigs()->first(),
             helloAssoPaymentId: 777,
             paymentDate: new \DateTimeImmutable(),
             amount: 20.0,
@@ -242,6 +254,55 @@ class PaymentProcessorTest extends TestCase
         $mailer = $this->createStub(NotificationMailer::class);
 
         $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer, $emailAliasRepository);
+        $processor->creditManually($payment);
+    }
+
+    /**
+     * The whole point of Payment::$helloAssoConfig (see its docblock): once a
+     * client has more than one HelloAsso form, a manual/late credit must use
+     * the config the payment actually came from for the alternative-email
+     * fallback — not just whichever config the client happens to expose
+     * first. Two configs with distinct organizationSlugs make a wrong pick
+     * observable via the assertion below.
+     */
+    public function testManualCreditUsesThePaymentsOwnConfigForTheAlternativeEmailLookupWhenClientHasTwoForms(): void
+    {
+        $client = $this->makeClient(automatic: true);
+
+        $secondConfig = (new HelloAssoConfig())
+            ->setLabel('Professionnels')
+            ->setActive(true)
+            ->setApiUrl('https://api.helloasso.example/')
+            ->setHelloAssoClientId('id-pro')
+            ->setClientSecretEncrypted('enc')
+            ->setOrganizationSlug('org-pro')
+            ->setFormSlug('form-pro')
+            ->setMaxAmount(250)
+            ->setFetchNbDays(5);
+        $client->addHelloAssoConfig($secondConfig);
+
+        $payment = new Payment(
+            client: $client,
+            helloAssoConfig: $secondConfig,
+            helloAssoPaymentId: 888,
+            paymentDate: new \DateTimeImmutable(),
+            amount: 20.0,
+            payerFirstName: 'Paul',
+            payerLastName: 'Martin',
+            email: 'paul@example.com',
+        );
+
+        $cyclosClient = $this->createStub(CyclosClient::class);
+        $cyclosClient->method('findUserByEmail')->willReturn(null); // forces the alternative-email fallback below.
+
+        $helloAssoClient = $this->createMock(HelloAssoClient::class);
+        $helloAssoClient->expects(self::once())->method('getAlternativeEmail')
+            ->with(self::callback(static fn (HelloAssoConfig $config) => $config->getOrganizationSlug() === 'org-pro'), 888)
+            ->willReturn(null);
+
+        $mailer = $this->createStub(NotificationMailer::class);
+
+        $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
         $processor->creditManually($payment);
     }
 }

@@ -145,9 +145,11 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
             <p>
                 Le tenant. Porte un nom, un <code>slug</code> unique (utilisé dans l'URL du
                 webhook et pour l'identifier dans les URLs admin), un statut actif/inactif, un
-                <code>contactEmail</code> optionnel, et trois relations one-to-one :
-                <code>HelloAssoConfig</code>, <code>CyclosConfig</code>, <code>ClientSetting</code>.
-                Un client doit être désactivé avant de pouvoir être supprimé (garde-fou dans
+                <code>contactEmail</code> optionnel, une relation one-to-many vers
+                <code>HelloAssoConfig</code> (un client peut avoir plusieurs formulaires, voir plus
+                bas) et deux relations one-to-one : <code>CyclosConfig</code>,
+                <code>ClientSetting</code>. Un client doit être désactivé avant de pouvoir être
+                supprimé (garde-fou dans
                 <code>ClientController::delete()</code>) ; la suppression efface aussi ses
                 paiements, ses comptes utilisateurs, ses règles <code>EmailAlias</code> et son logo
                 uploadé.
@@ -179,17 +181,47 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
             </p>
 
             <h4>HelloAssoConfig</h4>
+            <p>
+                Relation <strong>one-to-many</strong> avec <code>Client</code> : un client peut
+                avoir plusieurs formulaires HelloAsso (typiquement "Particuliers" /
+                "Professionnels"), chacun avec ses propres identifiants, son propre plafond et son
+                propre historique de paiements, mais rattachés au même <code>CyclosConfig</code> et
+                au même <code>ClientSetting</code> — la distinction pro/particulier pour le crédit
+                Cyclos se fait déjà par groupe Cyclos (voir <code>CyclosConfig</code> plus bas), pas
+                par formulaire d'origine. Voir <a href="#helloasso" data-docs-toc-target="link">Intégration HelloAsso</a>
+                pour la résolution du bon formulaire à la réception d'un webhook.
+            </p>
             <table class="docs-table">
                 <thead><tr><th>Champ</th><th>Rôle</th></tr></thead>
                 <tbody>
+                    <tr><td>label</td><td>Intitulé libre affiché côté admin pour distinguer les formulaires d'un même client (ex. "Particuliers"). Saisi via un menu Particuliers/Professionnels avec case à cocher "libellé personnalisé" pour le cas exceptionnel — voir <code>HelloAssoConfigType::LABEL_CHOICES</code></td></tr>
+                    <tr><td>active</td><td>Un formulaire désactivé n'est plus jamais retenu par le webhook ni le rattrapage, mais garde son historique de paiements. Un client garde toujours au moins un formulaire actif (garde-fou dans <code>ClientController::toggleHelloAssoConfig()</code>)</td></tr>
                     <tr><td>apiUrl</td><td>Racine de l'API HelloAsso (prod ou sandbox)</td></tr>
                     <tr><td>helloAssoClientId / clientSecretEncrypted</td><td>Identifiants OAuth2 <code>client_credentials</code> (secret chiffré, voir <a href="#securite" data-docs-toc-target="link">Sécurité</a>)</td></tr>
-                    <tr><td>organizationSlug, formType, formSlug</td><td>Identifient précisément la campagne HelloAsso à surveiller</td></tr>
+                    <tr><td>organizationSlug, formType, formSlug</td><td>Identifient précisément la campagne HelloAsso à surveiller. <code>formSlug</code> est unique par client (<code>client_helloasso_form_unique</code>) et sert à identifier quel formulaire un paiement notifié concerne</td></tr>
                     <tr><td>maxAmount</td><td>Plafond au-delà duquel un paiement est mis en attente d'approbation manuelle plutôt que crédité automatiquement</td></tr>
                     <tr><td>extraMailFieldName</td><td>Nom du champ personnalisé de commande contenant un email alternatif (si le payeur a utilisé un email différent de son compte Cyclos)</td></tr>
                     <tr><td>fetchNbDays</td><td>Fenêtre de jours couverte par le rattrapage périodique</td></tr>
                 </tbody>
             </table>
+            <div class="docs-note">
+                {{ icons.render('trash') }}
+                <p>
+                    Un formulaire ne peut être <strong>supprimé</strong> que s'il est déjà désactivé,
+                    n'a aucun paiement rattaché, <em>et</em> n'est pas le formulaire
+                    <strong>principal</strong> du client (<code>Client::getPrimaryHelloAssoConfig()</code> —
+                    le plus ancien par id, typiquement celui créé avec le client) —
+                    sinon seule la désactivation est possible
+                    (<code>ClientController::deleteHelloAssoConfig()</code>). Le formulaire
+                    principal reste supprimable nulle part, même sans aucun historique : un
+                    client qui n'a jamais eu qu'un seul formulaire ne doit pas pouvoir le perdre
+                    d'un simple clic. Ces garde-fous (jamais de dernier formulaire actif
+                    désactivable, jamais de formulaire actif ou principal supprimable) se
+                    combinent pour garantir qu'un client ne se retrouve jamais sans aucun
+                    formulaire, sans qu'une vérification "dernier formulaire" séparée soit
+                    nécessaire au moment de la suppression.
+                </p>
+            </div>
 
             <h4>CyclosConfig</h4>
             <table class="docs-table">
@@ -340,10 +372,12 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                 événements <code>Order</code> (envoyés en doublon du <code>Payment</code>
                 correspondant — les traiter créerait un double crédit) et tout ce qui n'est pas
                 un événement <code>Payment</code> bien formé. Ensuite : le <code>formSlug</code>
-                doit correspondre exactement à la configuration du client, le montant doit être
-                sous <code>maxAmount</code>, l'état doit être <code>Authorized</code> ou
-                <code>Waiting</code>, et le paiement ne doit pas déjà exister
-                (<code>client_id</code> + <code>helloAssoPaymentId</code>).
+                de la notification doit correspondre à l'un des formulaires <strong>actifs</strong>
+                du client (<code>HelloAssoConfigRepository::findOneActiveByClientAndFormSlug()</code> —
+                un client peut en avoir plusieurs, voir <a href="#entite-client" data-docs-toc-target="link">HelloAssoConfig</a>),
+                le montant doit être sous le <code>maxAmount</code> <em>de ce formulaire précis</em>,
+                l'état doit être <code>Authorized</code> ou <code>Waiting</code>, et le paiement ne
+                doit pas déjà exister (<code>client_id</code> + <code>helloAssoPaymentId</code>).
             </p>
             <h3>3. Décision automatique / manuel</h3>
             <ul>
@@ -357,7 +391,7 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                 <li>Recherche l'utilisateur Cyclos par l'email du payeur (<code>CyclosClient::findUserByEmail</code>).</li>
                 <li>Si introuvable, tente un email alternatif via un champ personnalisé de la commande HelloAsso (<code>HelloAssoClient::getAlternativeEmail</code>) et relance la recherche.</li>
                 <li>Détermine le type d'émission Cyclos à utiliser selon le groupe de l'utilisateur (<code>resolveEmissionType</code> — pro vs particulier). Un utilisateur dans un groupe non autorisé fait échouer le paiement.</li>
-                <li>Vérifie qu'un paiement portant la même description n'a pas déjà été crédité (anti-doublon, voir plus bas).</li>
+                <li>Vérifie qu'un paiement portant la même description n'a pas déjà été crédité (anti-doublon sur les transactions Cyclos récentes du destinataire, voir plus bas).</li>
                 <li>Exécute <code>POST system/payments</code> (ou <code>/preview</code> si les paiements Cyclos sont désactivés pour ce client).</li>
             </ol>
         </section>
@@ -367,8 +401,11 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
             <p>
                 <code>HelloAssoClient</code> encapsule l'authentification OAuth2
                 (<code>client_credentials</code>) et l'appel à l'API v5. Chaque appel est
-                paramétré par le <code>HelloAssoConfig</code> du client courant — aucune
-                configuration globale partagée entre clients.
+                paramétré par un <code>HelloAssoConfig</code> précis — celui du formulaire concerné,
+                pas juste du client — aucune configuration globale partagée entre clients ni entre
+                formulaires d'un même client. Le rattrapage (<code>fetchPaymentsHistory()</code>)
+                boucle sur chaque formulaire <strong>actif</strong> du client
+                (<code>Client::getActiveHelloAssoConfigs()</code>) et agrège les résultats.
             </p>
             <table class="docs-table">
                 <thead><tr><th>Méthode</th><th>Rôle</th></tr></thead>
@@ -404,7 +441,7 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                 <tbody>
                     <tr><td>findUserByEmail()</td><td>GET users</td><td>Recherche un membre par mot-clé (email), retourne son id et le nom interne de son groupe</td></tr>
                     <tr><td>resolveEmissionType()</td><td>—</td><td>Logique pure : compare le groupe de l'utilisateur à <code>groupProInternal</code>/<code>groupsPartInternal</code></td></tr>
-                    <tr><td>hasAlreadyCreditedPayment()</td><td>GET {email}/transactions</td><td>Anti-doublon — compare la description de la dernière transaction créditée</td></tr>
+                    <tr><td>hasAlreadyCreditedPayment()</td><td>GET {email}/transactions</td><td>Anti-doublon — cherche la description parmi les <code>DUPLICATE_CHECK_WINDOW</code> transactions de crédit les plus récentes (voir plus bas)</td></tr>
                     <tr><td>performPayment()</td><td>POST system/payments(/preview)</td><td>Exécute (ou prévisualise) le virement système→utilisateur</td></tr>
                 </tbody>
             </table>
@@ -466,18 +503,20 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                 icône, même bouton pré-rempli, mais vers <code>EmailAliasController::new()</code>
                 côté <code>/app</code>.
             </p>
-            <h3>Anti-doublon : une limite connue</h3>
+            <h3>Anti-doublon</h3>
             <p>
-                <code>hasAlreadyCreditedPayment()</code> ne compare que la <strong>dernière</strong>
-                transaction créditée de l'utilisateur (<code>pageSize: 1, orderBy: dateDesc</code>),
-                pas tout son historique — hérité tel quel du code Java d'origine. Si l'utilisateur
-                a reçu un autre paiement entre-temps, cette vérification ne verra plus l'ancien
-                paiement et un double crédit devient possible en théorie. Le risque est atténué
-                par défaut car la fenêtre de rattrapage (<code>fetchNbDays</code>, 5 jours par
-                défaut) est plus courte que la rétention de purge (<code>PAYMENT_RETENTION_DAYS</code>,
-                7 jours par défaut) — un paiement purgé n'est normalement plus dans la fenêtre de
-                rattrapage. Voir <a href="#historique" data-docs-toc-target="link">Incidents résolus</a> pour le detail de
-                cette analyse.
+                <code>hasAlreadyCreditedPayment()</code> scanne les <code>DUPLICATE_CHECK_WINDOW</code>
+                (50) transactions de crédit les plus récentes de l'utilisateur
+                (<code>orderBy: dateDesc</code>) et recherche une description correspondante parmi
+                elles — pas seulement la toute dernière. Confirmé empiriquement contre une instance
+                Cyclos réelle : l'endpoint <code>{email}/transactions</code> n'offre aucun filtre
+                serveur par description (un paramètre <code>keywords</code> y est silencieusement
+                ignoré), donc il n'existe pas de façon de demander directement "cette description
+                existe-t-elle quelque part" — c'est un compromis borné côté client, pas une garantie
+                absolue sur un historique infini. Voir
+                <a href="#historique" data-docs-toc-target="link">Incidents résolus</a> pour l'incident réel
+                qui a révélé qu'une fenêtre de une seule transaction (comportement d'origine, hérité
+                du code Java) ne suffisait pas.
             </p>
             <h3>Format du corps de paiement</h3>
             <p>
@@ -506,9 +545,15 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
             <ul>
                 <li>
                     <strong>Webhook temps réel</strong> — <code>POST /webhook/helloasso/{clientSlug}</code>
-                    (<code>WebhookController</code>). Nécessite qu'un humain configure cette URL
-                    côté HelloAsso ("Intégrations et API" du formulaire). Sans ça, aucun crédit
-                    automatique en temps réel — mais voir le point suivant.
+                    (<code>WebhookController</code>), une seule URL <strong>par client</strong>, pas
+                    par formulaire. Si un client a plusieurs formulaires HelloAsso, les deux (ou
+                    plus) pointent vers cette même URL côté HelloAsso ("Intégrations et API" de
+                    chaque formulaire) — c'est <code>PaymentProcessor</code> qui distingue ensuite
+                    lequel est concerné, via le <code>formSlug</code> inclus dans le corps de la
+                    notification (voir <a href="#cycle-paiement" data-docs-toc-target="link">Cycle de vie d'un paiement</a>).
+                    Aucune configuration webhook à changer en ajoutant un second formulaire. Nécessite
+                    qu'un humain configure cette URL côté HelloAsso pour chaque formulaire. Sans ça,
+                    aucun crédit automatique en temps réel — mais voir le point suivant.
                 </li>
                 <li>
                     <strong>Rattrapage périodique</strong> — <code>app:helloasso:fetch</code>,
@@ -855,8 +900,8 @@ public function record(
                 <code>php bin/phpunit</code>. Deux catégories :
             </p>
             <ul>
-                <li><strong>Unitaires</strong> — logique pure sans I/O : <code>PaymentStatusTest</code>, <code>CyclosClientResolveEmissionTypeTest</code>, <code>HelloAssoClientParseNotificationTest</code>, <code>SecretEncryptorTest</code>.</li>
-                <li><strong>Fonctionnels</strong> — <code>WebhookControllerTest</code>, requête HTTP simulée de bout en bout sur le webhook (client HTTP factice pour Cyclos/HelloAsso, base de test dédiée).</li>
+                <li><strong>Unitaires</strong> — logique pure sans I/O : <code>PaymentStatusTest</code>, <code>CyclosClientResolveEmissionTypeTest</code>, <code>CyclosClientHasAlreadyCreditedPaymentTest</code>, <code>HelloAssoClientParseNotificationTest</code>, <code>SecretEncryptorTest</code>, <code>PaymentProcessorTest</code>.</li>
+                <li><strong>Fonctionnels</strong> — <code>WebhookControllerTest</code> (requête HTTP simulée de bout en bout sur le webhook, y compris le routage vers le bon formulaire d'un client qui en a plusieurs), <code>HelloAssoConfigAdminTest</code> (ajout/édition/désactivation/suppression d'un formulaire), <code>ClientDeletionTest</code> — client HTTP factice pour Cyclos/HelloAsso, base de test dédiée.</li>
             </ul>
             <div class="docs-note docs-note--warning">
                 {{ icons.render('settings') }}
@@ -942,6 +987,37 @@ public function record(
                 (<code>ClientDeletionTest</code>) verrouille désormais ce cas précis — vérifié en
                 le désactivant temporairement pour confirmer qu'il échoue bien sans le correctif,
                 avant de le remettre en place.
+            </p>
+            <h3>Double crédit Cyclos : l'anti-doublon ne regardait qu'une seule transaction</h3>
+            <p>
+                Signalé après un test manuel : un paiement forcé au statut <code>Fail</code>
+                directement en base (pour simuler un état incohérent) a été re-crédité sans problème
+                en cliquant sur "Créditer" — alors qu'il avait déjà été réellement crédité sur
+                Cyclos auparavant. Cause : <code>hasAlreadyCreditedPayment()</code> ne comparait la
+                description attendue qu'à la <strong>toute dernière</strong> transaction de crédit
+                de l'utilisateur (<code>pageSize: 1</code>) — un comportement hérité tel quel du
+                code Java d'origine (<code>checkPaymentIsAlreadyDone</code>). Dès qu'une autre
+                transaction, même sans rapport, était créditée sur ce compte après le crédit
+                d'origine, celui-ci n'était plus "la dernière" et devenait invisible pour ce
+                contrôle.
+            </p>
+            <p>
+                Diagnostic confirmé en interrogeant directement une instance Cyclos de test réelle
+                (lecture seule, <code>{email}/transactions</code>) : pour un utilisateur ayant reçu
+                un crédit automatique HelloAsso puis un virement manuel sans rapport, la transaction
+                du crédit automatique se retrouvait en 2<sup>e</sup> position, pas en 1<sup>re</sup> —
+                exactement le scénario qui aurait fait échouer l'ancien contrôle. Le même test a
+                aussi vérifié qu'un paramètre <code>keywords</code> sur cet endpoint est silencieusement
+                ignoré par Cyclos : il n'existe pas de filtre serveur par description sur lequel
+                s'appuyer à la place.
+            </p>
+            <p>
+                Corrigé en élargissant la vérification à une fenêtre des
+                <code>DUPLICATE_CHECK_WINDOW</code> (50) transactions de crédit les plus récentes
+                plutôt qu'une seule (voir <a href="#cyclos" data-docs-toc-target="link">Intégration Cyclos</a>).
+                Un test de non-régression (<code>CyclosClientHasAlreadyCreditedPaymentTest</code>)
+                rejoue exactement la réponse JSON observée sur l'instance réelle, description
+                correspondante en 2<sup>e</sup> position plutôt qu'en 1<sup>re</sup>.
             </p>
         </section>
 

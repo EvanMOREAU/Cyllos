@@ -3,6 +3,7 @@
 namespace App\Payment;
 
 use App\Entity\Client;
+use App\Entity\HelloAssoConfig;
 use App\Entity\Payment;
 use App\Entity\PaymentStatus;
 use App\Integration\Cyclos\CyclosClient;
@@ -11,6 +12,7 @@ use App\Integration\HelloAsso\HelloAssoFetchedPayment;
 use App\Integration\HelloAsso\HelloAssoNotificationPayload;
 use App\Notification\NotificationMailer;
 use App\Repository\EmailAliasRepository;
+use App\Repository\HelloAssoConfigRepository;
 use App\Repository\PaymentRepository;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -29,6 +31,7 @@ class PaymentProcessor
         private readonly EntityManagerInterface $entityManager,
         private readonly PaymentRepository $paymentRepository,
         private readonly EmailAliasRepository $emailAliasRepository,
+        private readonly HelloAssoConfigRepository $helloAssoConfigRepository,
         private readonly HelloAssoClient $helloAssoClient,
         private readonly CyclosClient $cyclosClient,
         private readonly NotificationMailer $mailer,
@@ -48,11 +51,11 @@ class PaymentProcessor
             return null;
         }
 
-        $haConfig = $client->getHelloAssoConfig();
+        $haConfig = $this->helloAssoConfigRepository->findOneActiveByClientAndFormSlug($client, $parsed->formSlug);
         $setting = $client->getSetting();
 
-        if ($parsed->formSlug !== $haConfig->getFormSlug()) {
-            $this->logger->error('HelloAsso notification: form slug mismatch for client {client}', ['client' => $client->getSlug()]);
+        if ($haConfig === null) {
+            $this->logger->error('HelloAsso notification: no active config matches form slug {slug} for client {client}', ['slug' => $parsed->formSlug, 'client' => $client->getSlug()]);
 
             return null;
         }
@@ -61,7 +64,7 @@ class PaymentProcessor
 
         if ($parsed->amountCents > $haConfig->getMaxAmount() * 100) {
             if (!$alreadyKnown) {
-                $payment = $this->persistNewPayment($client, $parsed, PaymentStatus::TooHigh);
+                $payment = $this->persistNewPayment($client, $haConfig, $parsed, PaymentStatus::TooHigh);
                 $this->mailer->send(
                     $setting->getMailRecipient(),
                     '[Cyllos] Paiement dépassant la limite',
@@ -90,7 +93,7 @@ class PaymentProcessor
             return null;
         }
 
-        $payment = $this->persistNewPayment($client, $parsed, PaymentStatus::Todo);
+        $payment = $this->persistNewPayment($client, $haConfig, $parsed, PaymentStatus::Todo);
 
         return $this->applyAutomaticDecision($client, $payment, $parsed->state === 'Waiting');
     }
@@ -105,34 +108,36 @@ class PaymentProcessor
      */
     public function fetchMissingPayments(Client $client, bool $attemptAutomaticCredit = false): int
     {
-        $haConfig = $client->getHelloAssoConfig();
         $known = array_flip($this->paymentRepository->findAllHelloAssoIdsForClient($client));
-
-        $fetched = $this->helloAssoClient->fetchPaymentsHistory($haConfig, $haConfig->getFetchNbDays());
         $added = 0;
 
-        foreach ($fetched as $item) {
-            if (isset($known[$item->helloAssoPaymentId])) {
-                continue;
-            }
+        foreach ($client->getActiveHelloAssoConfigs() as $haConfig) {
+            $fetched = $this->helloAssoClient->fetchPaymentsHistory($haConfig, $haConfig->getFetchNbDays());
 
-            if ($attemptAutomaticCredit) {
-                $this->ingestFetchedPayment($client, $item);
-            } else {
-                $payment = new Payment(
-                    client: $client,
-                    helloAssoPaymentId: $item->helloAssoPaymentId,
-                    paymentDate: $this->parseDate($item->rawDate),
-                    amount: $item->amountCents / 100,
-                    payerFirstName: $item->payerFirstName,
-                    payerLastName: $item->payerLastName,
-                    email: $item->payerEmail,
-                );
-                $this->entityManager->persist($payment);
-            }
+            foreach ($fetched as $item) {
+                if (isset($known[$item->helloAssoPaymentId])) {
+                    continue;
+                }
 
-            $known[$item->helloAssoPaymentId] = true;
-            $added++;
+                if ($attemptAutomaticCredit) {
+                    $this->ingestFetchedPayment($client, $haConfig, $item);
+                } else {
+                    $payment = new Payment(
+                        client: $client,
+                        helloAssoConfig: $haConfig,
+                        helloAssoPaymentId: $item->helloAssoPaymentId,
+                        paymentDate: $this->parseDate($item->rawDate),
+                        amount: $item->amountCents / 100,
+                        payerFirstName: $item->payerFirstName,
+                        payerLastName: $item->payerLastName,
+                        email: $item->payerEmail,
+                    );
+                    $this->entityManager->persist($payment);
+                }
+
+                $known[$item->helloAssoPaymentId] = true;
+                $added++;
+            }
         }
 
         if ($added > 0) {
@@ -147,13 +152,12 @@ class PaymentProcessor
      * automatic-credit decision — used only when a manual sync should behave like
      * a real-time notification for each payment it discovers.
      */
-    private function ingestFetchedPayment(Client $client, HelloAssoFetchedPayment $item): void
+    private function ingestFetchedPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoFetchedPayment $item): void
     {
-        $haConfig = $client->getHelloAssoConfig();
         $setting = $client->getSetting();
 
         if ($item->amountCents > $haConfig->getMaxAmount() * 100) {
-            $payment = $this->persistFetchedPayment($client, $item, PaymentStatus::TooHigh);
+            $payment = $this->persistFetchedPayment($client, $haConfig, $item, PaymentStatus::TooHigh);
             $this->mailer->send(
                 $setting->getMailRecipient(),
                 '[Cyllos] Paiement dépassant la limite',
@@ -163,7 +167,7 @@ class PaymentProcessor
             return;
         }
 
-        $payment = $this->persistFetchedPayment($client, $item, PaymentStatus::Todo);
+        $payment = $this->persistFetchedPayment($client, $haConfig, $item, PaymentStatus::Todo);
         $this->applyAutomaticDecision($client, $payment, reportedWaiting: false);
     }
 
@@ -261,7 +265,7 @@ class PaymentProcessor
         }
 
         $cyclosConfig = $client->getCyclosConfig();
-        $haConfig = $client->getHelloAssoConfig();
+        $haConfig = $payment->getHelloAssoConfig();
         $setting = $client->getSetting();
 
         $email = $payment->getEmail();
@@ -324,10 +328,11 @@ class PaymentProcessor
         return new PaymentProcessingResult(PaymentStatus::Fail, [$error]);
     }
 
-    private function persistNewPayment(Client $client, HelloAssoNotificationPayload $parsed, PaymentStatus $status): Payment
+    private function persistNewPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoNotificationPayload $parsed, PaymentStatus $status): Payment
     {
         $payment = new Payment(
             client: $client,
+            helloAssoConfig: $haConfig,
             helloAssoPaymentId: $parsed->helloAssoPaymentId,
             paymentDate: $this->parseDate($parsed->rawDate),
             amount: $parsed->amountCents / 100,
@@ -343,10 +348,11 @@ class PaymentProcessor
         return $payment;
     }
 
-    private function persistFetchedPayment(Client $client, HelloAssoFetchedPayment $item, PaymentStatus $status): Payment
+    private function persistFetchedPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoFetchedPayment $item, PaymentStatus $status): Payment
     {
         $payment = new Payment(
             client: $client,
+            helloAssoConfig: $haConfig,
             helloAssoPaymentId: $item->helloAssoPaymentId,
             paymentDate: $this->parseDate($item->rawDate),
             amount: $item->amountCents / 100,

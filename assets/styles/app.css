@@ -371,11 +371,16 @@ code {
     display: flex;
     align-items: center;
     gap: 0.55rem;
+    width: 100%;
     padding: 0.5rem 0.6rem;
+    border: none;
     border-radius: 7px;
+    background: none;
     color: var(--color-text);
     font-size: 0.86rem;
+    font-family: inherit;
     font-weight: 520;
+    text-align: left;
     cursor: pointer;
 }
 
@@ -393,6 +398,28 @@ code {
     height: 1px;
     background: var(--color-border);
     margin: 0.35rem 0.2rem;
+}
+
+/* Modifier for a dropdown standing in for a form field, rather than a
+   top-bar filter: full width, left-aligned menu, same sizing as the other
+   .form-row inputs so it doesn't stand out as a different kind of control. */
+.dropdown--field {
+    width: 100%;
+}
+
+.dropdown--field .dropdown__trigger {
+    width: 100%;
+    min-width: 0;
+    padding: 0.58rem 0.75rem;
+    font-size: 0.88rem;
+    font-weight: 400;
+}
+
+.dropdown--field .dropdown__menu {
+    left: 0;
+    right: auto;
+    width: 100%;
+    min-width: 0;
 }
 
 /* ==========================================================================
@@ -1035,6 +1062,24 @@ code {
     font-weight: 620;
 }
 
+.summary-card__title-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 0.1rem;
+}
+
+.summary-card__title-eyebrow {
+    color: var(--color-text-tertiary);
+    font-weight: 620;
+    font-size: 0.68rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.summary-card__title-stack .status-pill {
+    margin-top: 0.15rem;
+}
+
 .summary-card__icon {
     width: 30px;
     height: 30px;
@@ -1055,6 +1100,35 @@ code {
 
 .summary-card__body {
     padding: 0 1.25rem 1.1rem;
+}
+
+.summary-card__footer-action {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 1rem;
+    padding-top: 0.9rem;
+    border-top: 1px solid var(--color-border);
+}
+
+.summary-card__footer-action form {
+    display: contents;
+}
+
+.summary-card--add {
+    display: flex;
+    border-style: dashed;
+    box-shadow: none;
+}
+
+.summary-card__body--center {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.7rem;
+    text-align: center;
+    padding: 1.5rem 1.25rem;
+    margin: auto;
 }
 
 .kv-list {
@@ -1250,6 +1324,7 @@ tbody tr:hover {
 
 .dot--active { background: var(--color-success); }
 .dot--inactive { background: var(--color-text-tertiary); }
+.dot--danger { background: var(--color-danger); }
 
 .status-pill {
     display: inline-flex;
@@ -1394,6 +1469,10 @@ tbody tr:hover {
 
 .form-grid .form-row--span2 {
     grid-column: 1 / -1;
+}
+
+.form-row.is-hidden {
+    display: none;
 }
 
 @media (max-width: 640px) {
@@ -1574,6 +1653,7 @@ tbody tr:hover {
 
 .flash--success { background: var(--color-success-soft); color: var(--color-success); border-color: var(--color-success-soft); }
 .flash--error { background: var(--color-danger-soft); color: var(--color-danger); border-color: var(--color-danger-soft); }
+.flash--info { background: var(--color-primary-soft); color: var(--color-primary); border-color: var(--color-primary-soft); }
 
 /* ==========================================================================
    Login

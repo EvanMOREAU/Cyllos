@@ -1,14 +1,19 @@
 {% extends 'base.html.twig' %}
+{% import 'components/icons.html.twig' as icons %}
 
-{% block title %}Nouveau client — HelloAsso - Cyllos{% endblock %}
+{% block title %}Nouveau formulaire HelloAsso — {{ client.name }} - Cyllos{% endblock %}
 {% block content_width %}content--narrow{% endblock %}
 
-{% block breadcrumb %}<div class="topbar__crumb"><a href="{{ path('admin_client_list') }}">Clients</a> / Nouveau</div>{% endblock %}
-{% block page_title %}Configuration HelloAsso{% endblock %}
+{% block breadcrumb %}<div class="topbar__crumb"><a href="{{ path('admin_client_list') }}">Clients</a> / <a href="{{ path('admin_client_show', {id: client.id}) }}">{{ client.name }}</a> / Nouveau formulaire HelloAsso</div>{% endblock %}
+{% block page_title %}Nouveau formulaire HelloAsso{% endblock %}
 
 {% block body %}
-    {% include 'admin/client/wizard/_stepper.html.twig' with {currentStep: 2} %}
-
+    {% if prefilled %}
+        <div class="flash flash--info">
+            {{ icons.render('inbox') }}
+            URL, Client ID, organisation et secret ont été pré-remplis à partir du premier formulaire de {{ client.name }} — modifiez-les si ce nouveau formulaire utilise un autre compte HelloAsso.
+        </div>
+    {% endif %}
     <div class="card">
         {{ form_start(form) }}
             <div class="field-group">
@@ -27,8 +32,8 @@
                 </div>
             </div>
             <div class="form-footer">
-                <a class="btn btn--ghost" href="{{ path('admin_client_new') }}">← Retour</a>
-                <button class="btn" type="submit">Continuer</button>
+                <a class="btn btn--ghost" href="{{ path('admin_client_show', {id: client.id}) }}">Annuler</a>
+                <button class="btn" type="submit">Ajouter le formulaire</button>
             </div>
         {{ form_end(form) }}
     </div>

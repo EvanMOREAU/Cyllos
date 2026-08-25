@@ -1,0 +1,7 @@
+{# Dropdown (Particuliers / Professionnels) with a checkbox escape hatch to a
+   free-text label — see HelloAssoConfigType::LABEL_CHOICES. #}
+<div class="form-grid" data-controller="helloasso-label">
+    {% include 'components/_styled_select_row.html.twig' with {field: form.labelChoice, extra_attr: {'data-helloasso-label-target': 'choice'}} only %}
+    {{ form_row(form.labelCustom, {attr: {'data-helloasso-label-target': 'custom', placeholder: 'ex. Bénévoles'}, row_attr: {class: 'form-row--span2'}}) }}
+    {{ form_row(form.useCustomLabel, {attr: {'data-helloasso-label-target': 'toggle', 'data-action': 'change->helloasso-label#sync'}, row_attr: {class: 'form-row--span2'}}) }}
+</div>
