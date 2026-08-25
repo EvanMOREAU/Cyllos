@@ -1,7 +1,7 @@
 {% extends 'base.html.twig' %}
 
 {% block title %}HelloAsso — {{ client.name }} - Cyllos{% endblock %}
-{% block content_width %}content--wide{% endblock %}
+{% block content_width %}content--full{% endblock %}
 
 {% block breadcrumb %}<div class="topbar__crumb"><a href="{{ path('admin_client_list') }}">Clients</a> / <a href="{{ path('admin_client_show', {id: client.id}) }}">{{ client.name }}</a> / HelloAsso — {{ config.label }}</div>{% endblock %}
 {% block page_title %}HelloAsso — {{ config.label }}{% endblock %}
@@ -11,7 +11,7 @@
         {{ form_start(form) }}
             <div class="field-group">
                 {% include 'admin/client/_helloasso_label_fields.html.twig' with {form: form} only %}
-                <div class="form-grid">
+                <div class="form-grid form-grid--wide">
                     {{ form_row(form.apiUrl) }}
                     {{ form_row(form.helloAssoClientId) }}
                     {{ form_row(form.clientSecret) }}

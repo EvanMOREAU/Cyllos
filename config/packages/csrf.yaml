@@ -1,11 +1,11 @@
-# Enable stateless CSRF protection for forms and logins/logouts
+# Un seul token id partagé par tous les formulaires (utile pour le wizard
+# multi-étapes). La protection CSRF stateless (cookie double-submit) a été
+# retirée : elle exigeait que le cookie et les en-têtes Origin/Referer
+# survivent parfaitement entre le GET et le POST, ce qui provoquait des
+# échecs de connexion aléatoires ("double-submit info ... is now missing")
+# alors que l'appli repose de toute façon entièrement sur la session
+# côté serveur. Voir /dev/documentation, section "Incidents résolus".
 framework:
     form:
         csrf_protection:
             token_id: submit
-
-    csrf_protection:
-        stateless_token_ids:
-            - submit
-            - authenticate
-            - logout
