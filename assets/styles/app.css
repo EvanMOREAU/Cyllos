@@ -1103,9 +1103,15 @@ code {
 }
 
 .summary-card__footer-action {
+    display: flex;
+    gap: 0.5rem;
     margin-top: 1rem;
     padding-top: 0.9rem;
     border-top: 1px solid var(--color-border);
+}
+
+.summary-card__footer-action form {
+    display: contents;
 }
 
 .summary-card--add {
@@ -1318,6 +1324,7 @@ tbody tr:hover {
 
 .dot--active { background: var(--color-success); }
 .dot--inactive { background: var(--color-text-tertiary); }
+.dot--danger { background: var(--color-danger); }
 
 .status-pill {
     display: inline-flex;
@@ -1646,6 +1653,7 @@ tbody tr:hover {
 
 .flash--success { background: var(--color-success-soft); color: var(--color-success); border-color: var(--color-success-soft); }
 .flash--error { background: var(--color-danger-soft); color: var(--color-danger); border-color: var(--color-danger-soft); }
+.flash--info { background: var(--color-primary-soft); color: var(--color-primary); border-color: var(--color-primary-soft); }
 
 /* ==========================================================================
    Login

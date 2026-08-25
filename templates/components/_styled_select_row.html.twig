@@ -1,0 +1,27 @@
+{% import 'components/icons.html.twig' as icons %}
+{#
+    Renders a single-choice form field as the styled dropdown used across the
+    app (assets/controllers/dropdown_controller.js, select mode) instead of a
+    plain native <select> — the <select> itself stays in the DOM (hidden) as
+    the real source of truth for validation/submission.
+
+    Params:
+    - field: the FormView to render (e.g. form.formType)
+    - extra_attr (optional): attrs merged onto the underlying <select>, e.g.
+      to also expose it as a target for another Stimulus controller
+    - row_class (optional): extra class(es) on the wrapping .form-row
+#}
+{%- set extra_attr = extra_attr|default({}) -%}
+<div class="form-row {{ row_class|default('') }}">
+    {{ form_label(field) }}
+    <div class="dropdown dropdown--field" data-controller="dropdown" data-action="click@window->dropdown#closeOnClickOutside keydown@window->dropdown#closeOnEscape">
+        <button type="button" class="dropdown__trigger" data-dropdown-target="trigger" data-action="dropdown#toggle" aria-haspopup="listbox" aria-expanded="false">
+            <span data-dropdown-target="label"></span>
+            {{ icons.render('chevron-right', 'style="transform:rotate(90deg)"') }}
+        </button>
+        <div class="dropdown__menu" data-dropdown-target="menu"></div>
+        {{ form_widget(field, {attr: extra_attr|merge({'data-dropdown-target': 'select', hidden: 'hidden'})}) }}
+    </div>
+    {{ form_errors(field) }}
+    {{ form_help(field) }}
+</div>

@@ -19,7 +19,7 @@
                     {{ form_row(form.helloAssoClientId) }}
                     {{ form_row(form.clientSecret) }}
                     {{ form_row(form.organizationSlug) }}
-                    {{ form_row(form.formType) }}
+                    {% include 'components/_styled_select_row.html.twig' with {field: form.formType} only %}
                     {{ form_row(form.formSlug) }}
                     {{ form_row(form.maxAmount) }}
                     {{ form_row(form.fetchNbDays) }}

@@ -11,7 +11,18 @@
         {{ form_start(form) }}
             <div class="field-group">
                 {% include 'admin/client/_helloasso_label_fields.html.twig' with {form: form} only %}
-                <div class="form-grid">{{ form_rest(form) }}</div>
+                <div class="form-grid">
+                    {{ form_row(form.apiUrl) }}
+                    {{ form_row(form.helloAssoClientId) }}
+                    {{ form_row(form.clientSecret) }}
+                    {{ form_row(form.organizationSlug) }}
+                    {% include 'components/_styled_select_row.html.twig' with {field: form.formType} only %}
+                    {{ form_row(form.formSlug) }}
+                    {{ form_row(form.maxAmount) }}
+                    {{ form_row(form.fetchNbDays) }}
+                    {{ form_row(form.extraMailFieldName) }}
+                    {{ form_rest(form) }}
+                </div>
             </div>
             <div class="form-footer">
                 <a class="btn btn--ghost" href="{{ path('admin_client_show', {id: client.id}) }}">Annuler</a>

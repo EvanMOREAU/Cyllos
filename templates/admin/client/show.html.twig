@@ -58,9 +58,7 @@
                             <span class="summary-card__title-eyebrow">HelloAsso</span>
                             <span>
                                 {{ haConfig.label }}
-                                {% if not haConfig.active %}
-                                    <span class="status-pill"><span class="dot dot--inactive"></span> Désactivé</span>
-                                {% endif %}
+                                <span class="status-pill"><span class="dot {{ haConfig.active ? 'dot--active' : 'dot--inactive' }}"></span> {{ haConfig.active ? 'Actif' : 'Désactivé' }}</span>
                             </span>
                         </span>
                     </div>
@@ -74,10 +72,24 @@
                         <div class="kv-row"><dt>Client ID</dt><dd><code>{{ haConfig.helloAssoClientId }}</code></dd></div>
                         <div class="kv-row"><dt>Montant max</dt><dd>{{ haConfig.maxAmount }} €</dd></div>
                     </dl>
-                    <form method="post" action="{{ path('admin_client_toggle_helloasso_config', {id: client.id, configId: haConfig.id}) }}" class="summary-card__footer-action" data-confirm-title="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }} le formulaire" data-confirm-message="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }} le formulaire \"{{ haConfig.label }}\" ?" data-confirm-confirm-label="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }}">
-                        <input type="hidden" name="_token" value="{{ csrf_token('toggle_helloasso_config_' ~ haConfig.id) }}">
-                        <button class="btn btn--ghost btn--sm" type="submit">{{ icons.render(haConfig.active ? 'x' : 'check') }} {{ haConfig.active ? 'Désactiver' : 'Réactiver' }}</button>
-                    </form>
+                    <div class="summary-card__footer-action">
+                        <form method="post" action="{{ path('admin_client_toggle_helloasso_config', {id: client.id, configId: haConfig.id}) }}" data-confirm-title="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }} le formulaire" data-confirm-message="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }} le formulaire \"{{ haConfig.label }}\" ?" data-confirm-confirm-label="{{ haConfig.active ? 'Désactiver' : 'Réactiver' }}">
+                            <input type="hidden" name="_token" value="{{ csrf_token('toggle_helloasso_config_' ~ haConfig.id) }}">
+                            <button class="btn btn--ghost btn--sm" type="submit">{{ icons.render(haConfig.active ? 'x' : 'check') }} {{ haConfig.active ? 'Désactiver' : 'Réactiver' }}</button>
+                        </form>
+                        {% if haConfig.id == primaryHelloAssoConfigId %}
+                            <span class="icon-btn" title="Le formulaire principal d'un client ne peut pas être supprimé, seulement désactivé" style="opacity:0.4; cursor:not-allowed;">{{ icons.render('trash') }}</span>
+                        {% elseif haConfig.active %}
+                            <span class="icon-btn" title="Désactivez le formulaire avant de pouvoir le supprimer" style="opacity:0.4; cursor:not-allowed;">{{ icons.render('trash') }}</span>
+                        {% elseif haConfig.id in deletableHelloAssoConfigIds %}
+                            <form method="post" action="{{ path('admin_client_delete_helloasso_config', {id: client.id, configId: haConfig.id}) }}" data-confirm-title="Supprimer le formulaire" data-confirm-message="Supprimer définitivement le formulaire \"{{ haConfig.label }}\" ? Cette action est irréversible.">
+                                <input type="hidden" name="_token" value="{{ csrf_token('delete_helloasso_config_' ~ haConfig.id) }}">
+                                <button class="btn btn--ghost btn--sm" type="submit">{{ icons.render('trash') }} Supprimer</button>
+                            </form>
+                        {% else %}
+                            <span class="icon-btn" title="Ce formulaire a un historique de paiements, il ne peut pas être supprimé" style="opacity:0.4; cursor:not-allowed;">{{ icons.render('trash') }}</span>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         {% endfor %}

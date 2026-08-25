@@ -1,4 +1,5 @@
 {% extends 'base.html.twig' %}
+{% import 'components/icons.html.twig' as icons %}
 
 {% block title %}Nouveau formulaire HelloAsso — {{ client.name }} - Cyllos{% endblock %}
 {% block content_width %}content--narrow{% endblock %}
@@ -7,6 +8,12 @@
 {% block page_title %}Nouveau formulaire HelloAsso{% endblock %}
 
 {% block body %}
+    {% if prefilled %}
+        <div class="flash flash--info">
+            {{ icons.render('inbox') }}
+            URL, Client ID, organisation et secret ont été pré-remplis à partir du premier formulaire de {{ client.name }} — modifiez-les si ce nouveau formulaire utilise un autre compte HelloAsso.
+        </div>
+    {% endif %}
     <div class="card">
         {{ form_start(form) }}
             <div class="field-group">
@@ -17,7 +24,7 @@
                     {{ form_row(form.helloAssoClientId) }}
                     {{ form_row(form.clientSecret) }}
                     {{ form_row(form.organizationSlug) }}
-                    {{ form_row(form.formType) }}
+                    {% include 'components/_styled_select_row.html.twig' with {field: form.formType} only %}
                     {{ form_row(form.formSlug) }}
                     {{ form_row(form.maxAmount) }}
                     {{ form_row(form.fetchNbDays) }}

@@ -97,7 +97,7 @@ class HelloAssoConfigType extends AbstractType
                 'required' => $options['secret_required'],
                 'attr' => ['autocomplete' => 'new-password'],
                 'constraints' => $options['secret_required'] ? [new Assert\NotBlank()] : [],
-                'help' => $options['secret_required'] ? null : 'Laisser vide pour conserver le secret actuel.',
+                'help' => $options['secret_required'] ? null : ($options['secret_help'] ?? 'Laisser vide pour conserver le secret actuel.'),
             ])
             ->add('organizationSlug', TextType::class, [
                 'label' => "Slug de l'organisation",
@@ -135,6 +135,7 @@ class HelloAssoConfigType extends AbstractType
         $resolver->setDefaults([
             'data_class' => HelloAssoConfig::class,
             'secret_required' => true,
+            'secret_help' => null,
         ]);
     }
 }

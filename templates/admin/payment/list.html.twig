@@ -26,6 +26,7 @@
                 <thead>
                     <tr>
                         <th>Client</th>
+                        <th>Formulaire</th>
                         <th>Id</th>
                         <th>Date</th>
                         <th>Montant</th>
@@ -41,6 +42,12 @@
                         {% set hasAlias = aliasedEmails[payment.client.id ~ '|' ~ payment.payerEmail] is defined %}
                         <tr>
                             <td><a href="{{ path('admin_client_show', {id: payment.client.id}) }}">{{ payment.client.name }}</a></td>
+                            <td class="cell-muted">
+                                {{ payment.helloAssoConfig.label }}
+                                {% if not payment.helloAssoConfig.active %}
+                                    <span class="status-pill"><span class="dot dot--inactive"></span> Désactivé</span>
+                                {% endif %}
+                            </td>
                             <td class="cell-muted">{{ payment.helloAssoPaymentId }}</td>
                             <td>{{ payment.paymentDate|date('d/m/Y H:i') }}</td>
                             <td class="cell-primary">{{ payment.amount|number_format(2, ',', ' ') }} €</td>

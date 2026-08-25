@@ -48,7 +48,15 @@ class Client
     #[Assert\Email]
     private ?string $contactEmail = null;
 
+    /**
+     * Ordered by id (creation order) rather than left to the database's
+     * default — several call sites (the "primary form" check in
+     * ClientController, the credential-prefill source when adding a new
+     * form) rely on ->first() meaning "the client's original form", which
+     * needs a deterministic order to mean anything.
+     */
     #[ORM\OneToMany(mappedBy: 'client', targetEntity: HelloAssoConfig::class, cascade: ['persist', 'remove'])]
+    #[ORM\OrderBy(['id' => 'ASC'])]
     private Collection $helloAssoConfigs;
 
     #[ORM\OneToOne(mappedBy: 'client', targetEntity: CyclosConfig::class, cascade: ['persist', 'remove'])]
@@ -151,6 +159,19 @@ class Client
     public function getActiveHelloAssoConfigs(): Collection
     {
         return $this->helloAssoConfigs->filter(static fn (HelloAssoConfig $config) => $config->isActive());
+    }
+
+    /**
+     * The client's original HelloAsso form (oldest by id) — the one it had
+     * before it's ever had a second. Unlike any form added afterward, it can
+     * never be deleted (see ClientController::deleteHelloAssoConfig()),
+     * only deactivated: a client that has only ever had one form shouldn't
+     * lose it to a stray click just because it happens to have no payment
+     * history yet.
+     */
+    public function getPrimaryHelloAssoConfig(): ?HelloAssoConfig
+    {
+        return $this->helloAssoConfigs->isEmpty() ? null : $this->helloAssoConfigs->first();
     }
 
     public function addHelloAssoConfig(HelloAssoConfig $config): static

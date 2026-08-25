@@ -63,6 +63,12 @@ ouvert à des tests d'intrusion non sollicités.
 - Un journal d'audit (`ActivityLog`) trace les modifications d'entités
   sensibles, les connexions, et les appels API sortants — avec exclusion
   explicite des champs contenant des secrets ou des identifiants OAuth2.
+- Anti-double-crédit sur les paiements Cyclos (`CyclosClient::hasAlreadyCreditedPayment()`) :
+  avant tout crédit, recherche d'une transaction déjà existante avec la même
+  description parmi les transactions récentes du destinataire — indépendant du
+  statut local du `Payment`, pour rester une protection même si celui-ci a été
+  altéré ou incohérent. Voir la page Documentation (`/dev/documentation`,
+  section "Incidents résolus") pour l'historique de ce contrôle.
 
 ## Ce que nous demandons en cas de signalement
 
