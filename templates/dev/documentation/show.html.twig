@@ -1110,7 +1110,7 @@ public function record(
                 le rejetant, ce qui est le comportement correct.
             </p>
             <p>
-                Corrigé en ajoutant <code>{{ form_rest(form) }}</code> dans
+                Corrigé en ajoutant <code>{% verbatim %}{{ form_rest(form) }}{% endverbatim %}</code> dans
                 <code>reglages.html.twig</code>. Couvert par un nouveau test fonctionnel,
                 <code>tests/Functional/ClientWizardTest.php</code>, qui parcourt les 4 étapes de
                 l'assistant en soumettant à chaque fois le vrai formulaire crawlé (jamais un jeton

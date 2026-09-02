@@ -1,13 +1,18 @@
 {% import 'components/icons.html.twig' as icons %}
-{% set labels = {'': 'Tous les statuts', 'todo': 'À faire', 'success': 'Réussi', 'fail': 'Échec'} %}
-<div class="dropdown" data-controller="dropdown" data-action="click@window->dropdown#closeOnClickOutside keydown@window->dropdown#closeOnEscape">
+{% set labels = {'': 'Tous les statuts', 'success': 'Réussi', 'todo': 'À faire', 'fail': 'Échec'} %}
+{% set current = statusFilter|default('') %}
+<div class="dropdown dropdown--filter" data-controller="dropdown" data-action="click@window->dropdown#closeOnClickOutside keydown@window->dropdown#closeOnEscape">
     <button type="button" class="dropdown__trigger" data-dropdown-target="trigger" data-action="dropdown#toggle" aria-haspopup="true" aria-expanded="false">
-        <span>{{ labels[statusFilter|default('')] }}</span>
+        {% if current %}<span class="dot dot--{{ current }}"></span>{% endif %}
+        <span class="dropdown__trigger-label">{{ labels[current] }}</span>
         {{ icons.render('chevron-right', 'style="transform:rotate(90deg)"') }}
     </button>
     <div class="dropdown__menu" data-dropdown-target="menu">
         {% for value, label in labels %}
-            <a class="dropdown__item {{ (statusFilter|default('')) == value ? 'is-selected' : '' }}" href="{{ path('admin_payment_list', {client: selectedClient ? selectedClient.id : null, status: value}) }}">{{ label }}</a>
+            <a class="dropdown__item {{ current == value ? 'is-selected' : '' }}" href="{{ path('admin_payment_list', {client: selectedClient ? selectedClient.id : null, status: value}) }}">
+                {% if value %}<span class="dot dot--{{ value }}"></span>{% endif %}
+                {{ label }}
+            </a>
             {% if loop.first %}<div class="dropdown__divider"></div>{% endif %}
         {% endfor %}
     </div>
