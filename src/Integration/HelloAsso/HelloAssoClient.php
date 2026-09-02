@@ -242,13 +242,23 @@ class HelloAssoClient
                 'timeout' => self::REQUEST_TIMEOUT,
             ]);
 
-            $this->apiCallLogger->record('helloasso', 'POST', $url, '(identifiants OAuth2 — non journalisés)', $response->getStatusCode(), '(jeton d\'accès — non journalisé)', 'Authentification OAuth2');
-
             $data = $response->toArray(false);
             $accessToken = $data['access_token'] ?? null;
+
             if (!\is_string($accessToken) || $accessToken === '') {
-                throw new HelloAssoException('HelloAsso token response did not contain an access_token.');
+                // Not a token response — most likely a standard OAuth2 error body
+                // (e.g. {"error":"invalid_client","error_description":"..."}), which
+                // never contains a secret, unlike a real token response. Safe to log
+                // and surface as-is, so a misconfigured client_id/secret is
+                // diagnosable from the journal/exception instead of a bare "no
+                // access_token" message.
+                $reason = $this->describeTokenError($data);
+                $this->apiCallLogger->record('helloasso', 'POST', $url, '(identifiants OAuth2 — non journalisés)', $response->getStatusCode(), $reason, 'Authentification OAuth2 — échec');
+
+                throw new HelloAssoException(sprintf('HelloAsso token response did not contain an access_token (HTTP %d): %s', $response->getStatusCode(), $reason));
             }
+
+            $this->apiCallLogger->record('helloasso', 'POST', $url, '(identifiants OAuth2 — non journalisés)', $response->getStatusCode(), '(jeton d\'accès — non journalisé)', 'Authentification OAuth2');
 
             return $accessToken;
         } catch (HttpClientExceptionInterface $exception) {
@@ -256,6 +266,26 @@ class HelloAssoClient
 
             throw new HelloAssoException('Failed to fetch HelloAsso access token: ' . $exception->getMessage(), previous: $exception);
         }
+    }
+
+    /**
+     * Extracts only the standard OAuth2 error fields ("error" / "error_description")
+     * from a failed token response — never the raw body, in case HelloAsso ever
+     * echoes back something unexpected. Falls back to a generic message if the
+     * response doesn't even look like a recognizable OAuth2 error.
+     */
+    private function describeTokenError(array $data): string
+    {
+        $error = $data['error'] ?? null;
+        $description = $data['error_description'] ?? null;
+
+        if (\is_string($error) && $error !== '') {
+            return \is_string($description) && $description !== ''
+                ? sprintf('%s (%s)', $error, $description)
+                : $error;
+        }
+
+        return 'réponse inattendue de HelloAsso (ni access_token, ni erreur OAuth2 reconnaissable)';
     }
 
     private function disconnect(HelloAssoConfig $config, string $token): void

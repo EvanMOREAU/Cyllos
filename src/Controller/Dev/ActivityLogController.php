@@ -28,11 +28,13 @@ class ActivityLogController extends AbstractController
     public function list(Request $request): Response
     {
         $page = $request->query->getInt('page', 1);
-        $pagination = $this->activityLogRepository->paginate($page, self::PER_PAGE);
+        $showHelloAsso = $request->query->getBoolean('showHelloAsso');
+        $pagination = $this->activityLogRepository->paginate($page, self::PER_PAGE, $showHelloAsso);
 
         return $this->render('dev/activity_log/list.html.twig', [
             'logs' => $pagination['items'],
             'pagination' => $pagination,
+            'showHelloAsso' => $showHelloAsso,
             'flushForm' => $this->createForm(ConfirmPasswordType::class)->createView(),
         ]);
     }

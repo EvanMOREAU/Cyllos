@@ -110,7 +110,11 @@ d'erreur le cas échéant, visible dans les listes de paiements.
 - **`/dev`** (`ROLE_DEVELOPER`) : journal d'activité (`ActivityLog`), qui trace
   les créations/modifications/suppressions d'entités sensibles, les
   évènements de connexion et les appels API sortants (HelloAsso/Cyclos), via
-  des listeners Doctrine et Security ; page de version et mise à jour.
+  des listeners Doctrine et Security ; page de version et mise à jour. Les
+  appels API HelloAsso (bien plus nombreux, rattrapage chaque minute) sont
+  masqués par défaut dans le journal — un bouton en haut de la page les
+  réaffiche à la demande, sans affecter les appels Cyclos ni les lignes
+  d'audit.
 - **`/settings`** : self-service pour tout utilisateur connecté (thème clair/
   sombre, email, mot de passe, double authentification optionnelle).
 

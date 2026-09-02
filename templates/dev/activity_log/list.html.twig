@@ -6,6 +6,11 @@
 
 {% block page_title %}Journal d'activité{% endblock %}
 {% block page_actions %}
+    <a href="{{ path('dev_log_list', {showHelloAsso: showHelloAsso ? null : 1}) }}"
+       class="btn btn--secondary"
+       title="{{ showHelloAsso ? 'Masquer les appels API HelloAsso' : 'Masqués par défaut — trop nombreux (rattrapage automatique chaque minute) pour être utiles au quotidien' }}">
+        {{ icons.render('sync') }} {{ showHelloAsso ? 'Masquer' : 'Afficher' }} les appels HelloAsso
+    </a>
     {% if logs is not empty %}
         <div data-controller="modal">
             <button type="button" class="btn btn--danger" data-action="click->modal#open">{{ icons.render('trash') }} Vider le journal</button>
@@ -115,6 +120,6 @@
                 </div>
             </div>
         </div>
-        {% include 'components/_pagination.html.twig' with {pagination: pagination, route: 'dev_log_list', params: {}} only %}
+        {% include 'components/_pagination.html.twig' with {pagination: pagination, route: 'dev_log_list', params: {showHelloAsso: showHelloAsso ? 1 : null}} only %}
     {% endif %}
 {% endblock %}
