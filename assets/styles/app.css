@@ -331,6 +331,7 @@ code {
     font-weight: 540;
     cursor: pointer;
     min-width: 180px;
+    line-height: 1.2;
 }
 
 .dropdown__trigger:hover {
@@ -398,6 +399,29 @@ code {
     height: 1px;
     background: var(--color-border);
     margin: 0.35rem 0.2rem;
+}
+
+/* Modifier for a row of top-bar filter dropdowns (status + client) that must
+   stay visually the same width as each other, whatever their content —
+   otherwise a selected client's avatar+name grows the trigger past its
+   neighbour. */
+.dropdown--filter .dropdown__trigger {
+    max-width: 180px;
+    height: 36px;
+}
+
+/* The client filter's avatar (28px) is taller than the plain-text status
+   trigger's line box — without this, picking a client made that one button
+   visibly taller than its neighbour. Shrunk only in this context. */
+.dropdown--filter .dropdown__trigger .avatar--sm {
+    width: 22px;
+    height: 22px;
+}
+
+.dropdown__trigger-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 /* Modifier for a dropdown standing in for a form field, rather than a
@@ -1325,6 +1349,9 @@ tbody tr:hover {
 .dot--active { background: var(--color-success); }
 .dot--inactive { background: var(--color-text-tertiary); }
 .dot--danger { background: var(--color-danger); }
+.dot--todo { background: var(--color-warning); }
+.dot--success { background: var(--color-success); }
+.dot--fail { background: var(--color-danger); }
 
 .status-pill {
     display: inline-flex;

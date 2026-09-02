@@ -1,10 +1,10 @@
 {% import 'components/icons.html.twig' as icons %}
-<div class="dropdown" data-controller="dropdown" data-action="click@window->dropdown#closeOnClickOutside keydown@window->dropdown#closeOnEscape">
+<div class="dropdown dropdown--filter" data-controller="dropdown" data-action="click@window->dropdown#closeOnClickOutside keydown@window->dropdown#closeOnEscape">
     <button type="button" class="dropdown__trigger" data-dropdown-target="trigger" data-action="dropdown#toggle" aria-haspopup="true" aria-expanded="false">
         {% if selectedClient %}
             {% include 'components/_client_avatar.html.twig' with {client: selectedClient, size: 'sm'} only %}
         {% endif %}
-        <span>{{ selectedClient ? selectedClient.name : 'Tous les clients' }}</span>
+        <span class="dropdown__trigger-label">{{ selectedClient ? selectedClient.name : 'Tous les clients' }}</span>
         {{ icons.render('chevron-right', 'style="transform:rotate(90deg)"') }}
     </button>
     <div class="dropdown__menu" data-dropdown-target="menu">
