@@ -19,14 +19,19 @@ class ActivityLogRepository extends ServiceEntityRepository
     /**
      * @return ActivityLog[]
      */
-    public function findRecent(int $limit = 100, int $offset = 0): array
+    public function findRecent(int $limit = 100, int $offset = 0, bool $includeHelloAssoCalls = true): array
     {
-        return $this->createQueryBuilder('l')
+        $qb = $this->createQueryBuilder('l')
             ->orderBy('l.createdAt', 'DESC')
             ->setMaxResults($limit)
-            ->setFirstResult($offset)
-            ->getQuery()
-            ->getResult();
+            ->setFirstResult($offset);
+
+        if (!$includeHelloAssoCalls) {
+            $qb->andWhere('l.action != :helloAssoAction')
+                ->setParameter('helloAssoAction', 'api.helloasso');
+        }
+
+        return $qb->getQuery()->getResult();
     }
 
     public function deleteAll(): int
@@ -40,16 +45,21 @@ class ActivityLogRepository extends ServiceEntityRepository
     /**
      * @return array{items: ActivityLog[], total: int, page: int, perPage: int, pageCount: int}
      */
-    public function paginate(int $page, int $perPage): array
+    public function paginate(int $page, int $perPage, bool $includeHelloAssoCalls = true): array
     {
         $page = max(1, $page);
 
-        $total = (int) $this->createQueryBuilder('l')
-            ->select('COUNT(l.id)')
-            ->getQuery()
-            ->getSingleScalarResult();
+        $countQb = $this->createQueryBuilder('l')
+            ->select('COUNT(l.id)');
 
-        $items = $this->findRecent($perPage, ($page - 1) * $perPage);
+        if (!$includeHelloAssoCalls) {
+            $countQb->andWhere('l.action != :helloAssoAction')
+                ->setParameter('helloAssoAction', 'api.helloasso');
+        }
+
+        $total = (int) $countQb->getQuery()->getSingleScalarResult();
+
+        $items = $this->findRecent($perPage, ($page - 1) * $perPage, $includeHelloAssoCalls);
 
         return [
             'items' => $items,

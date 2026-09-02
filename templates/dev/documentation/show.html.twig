@@ -664,6 +664,22 @@ public function record(
     ?string $responseBody,
     ?string $summary = null,
 ): void</div>
+            <h3>Filtre "Afficher les appels API HelloAsso"</h3>
+            <p>
+                Le rattrapage HelloAsso tournant chaque minute pour chaque client actif (voir
+                <a href="#webhook" data-docs-toc-target="link">Webhook &amp; rattrapage</a>), les lignes
+                <code>action = "api.helloasso"</code> finissent par noyer le reste du journal — les
+                lignes d'audit (créations, modifications, suppressions) et les appels Cyclos, bien
+                moins fréquents, qui sont en général ce qu'on cherche réellement. Sur
+                <code>/dev/journal</code>, ces lignes sont donc <strong>masquées par défaut</strong> :
+                un bouton en haut de la page ("Afficher les appels HelloAsso") les réaffiche à la
+                demande. Volontairement un simple lien (pas une case à cocher + JS) — l'état est
+                porté par le paramètre de requête <code>?showHelloAsso=1</code>, un aller-retour GET
+                classique, préservé d'une page de pagination à l'autre. Le filtre s'applique
+                uniquement à <code>action = "api.helloasso"</code> —
+                les appels Cyclos (<code>action = "api.cyclos"</code>) restent toujours visibles, tout
+                comme les lignes d'audit d'entité.
+            </p>
             <h3>Vidage du journal</h3>
             <p>
                 <code>/dev/journal</code> propose un bouton "Vider le journal" — restreint à
