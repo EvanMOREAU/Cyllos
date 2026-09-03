@@ -1,0 +1,10 @@
+framework:
+    rate_limiter:
+        # Per-client throttle on the HelloAsso webhook, keyed by the {clientSlug}
+        # in the URL. HelloAsso's real payment volume is a trickle, so 30 burst +
+        # 30/minute is invisible in normal use but caps a flood aimed at a known
+        # client slug (HelloAsso does not sign its notifications).
+        webhook:
+            policy: 'token_bucket'
+            limit: 30
+            rate: { interval: '1 minute', amount: 30 }

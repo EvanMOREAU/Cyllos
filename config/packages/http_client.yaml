@@ -1,0 +1,21 @@
+framework:
+    http_client:
+        scoped_clients:
+            # Outbound HelloAsso calls: idempotent reads plus the side-effect-free
+            # OAuth2 token POST, so the default retry rules (429/5xx + transport
+            # errors, exponential backoff) are safe as-is.
+            helloasso.client:
+                scope: '.*'
+                retry_failed:
+                    max_retries: 3
+                    delay: 1000
+                    multiplier: 2
+                    max_delay: 10000
+
+            # Outbound Cyclos calls: same rules, but NonMutatingRetryStrategy blocks
+            # any retry of the payment POST (see its docblock).
+            cyclos.client:
+                scope: '.*'
+                retry_failed:
+                    retry_strategy: App\Http\NonMutatingRetryStrategy
+                    max_retries: 3

@@ -34,6 +34,27 @@ class Client
     private \DateTimeImmutable $createdAt;
 
     /**
+     * Shared secret embedded in the client's HelloAsso webhook URL
+     * (/webhook/helloasso/{slug}/{webhookToken}). HelloAsso does not sign its
+     * notifications, so this token is the only thing that authenticates an
+     * incoming payload as really coming from this client's HelloAsso account.
+     * 64 hex chars = 32 random bytes; generated on creation, rotatable via
+     * regenerateWebhookToken().
+     */
+    #[ORM\Column(length: 64, unique: true)]
+    private string $webhookToken;
+
+    /**
+     * Last time HelloAsso hit the token-less legacy webhook URL for this
+     * client (see WebhookController::legacy()). A recent value means the
+     * client's notification URL in HelloAsso still needs the token appended;
+     * surfaced on the admin dashboard. Written at most hourly to keep the
+     * unauthenticated legacy endpoint cheap.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $legacyWebhookLastSeenAt = null;
+
+    /**
      * Stored filename of the client's logo in public/uploads/client-logos/, if any.
      */
     #[ORM\Column(length: 255, nullable: true)]
@@ -65,6 +86,14 @@ class Client
     #[ORM\OneToOne(mappedBy: 'client', targetEntity: ClientSetting::class, cascade: ['persist', 'remove'])]
     private ?ClientSetting $setting = null;
 
+    /**
+     * Optional per-client cosmetic overrides (e-mail wording, Cyclos
+     * description prefix...). Absent for most clients — a null relation means
+     * "application defaults everywhere", see ClientCustomization.
+     */
+    #[ORM\OneToOne(mappedBy: 'client', targetEntity: ClientCustomization::class, cascade: ['persist', 'remove'])]
+    private ?ClientCustomization $customization = null;
+
     #[ORM\OneToMany(mappedBy: 'client', targetEntity: Payment::class)]
     private Collection $payments;
 
@@ -73,6 +102,12 @@ class Client
         $this->createdAt = new \DateTimeImmutable();
         $this->payments = new ArrayCollection();
         $this->helloAssoConfigs = new ArrayCollection();
+        $this->webhookToken = self::generateWebhookToken();
+    }
+
+    private static function generateWebhookToken(): string
+    {
+        return bin2hex(random_bytes(32));
     }
 
     public function getId(): ?int
@@ -119,6 +154,34 @@ class Client
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function getWebhookToken(): string
+    {
+        return $this->webhookToken;
+    }
+
+    /**
+     * Issues a fresh webhook token. The client's HelloAsso notification URL must
+     * be updated accordingly, otherwise incoming payloads stop being accepted.
+     */
+    public function regenerateWebhookToken(): static
+    {
+        $this->webhookToken = self::generateWebhookToken();
+
+        return $this;
+    }
+
+    public function getLegacyWebhookLastSeenAt(): ?\DateTimeImmutable
+    {
+        return $this->legacyWebhookLastSeenAt;
+    }
+
+    public function setLegacyWebhookLastSeenAt(?\DateTimeImmutable $legacyWebhookLastSeenAt): static
+    {
+        $this->legacyWebhookLastSeenAt = $legacyWebhookLastSeenAt;
+
+        return $this;
     }
 
     public function getLogoFilename(): ?string
@@ -216,6 +279,21 @@ class Client
         $this->setting = $setting;
         if ($setting !== null && $setting->getClient() !== $this) {
             $setting->setClient($this);
+        }
+
+        return $this;
+    }
+
+    public function getCustomization(): ?ClientCustomization
+    {
+        return $this->customization;
+    }
+
+    public function setCustomization(?ClientCustomization $customization): static
+    {
+        $this->customization = $customization;
+        if ($customization !== null && $customization->getClient() !== $this) {
+            $customization->setClient($this);
         }
 
         return $this;

@@ -4,18 +4,20 @@ namespace App\Controller\Admin;
 
 use App\Client\ClientLogoUploader;
 use App\Entity\Client;
+use App\Entity\ClientCustomization;
 use App\Entity\EmailAlias;
 use App\Entity\HelloAssoConfig;
 use App\Entity\User;
+use App\Form\ClientCustomizationType;
 use App\Form\ClientInfoType;
 use App\Form\ClientSettingType;
 use App\Form\ClientUserType;
-use App\Form\EmailAliasType;
-use App\Form\ResetPasswordType;
 use App\Form\ClientWizardState;
 use App\Form\CyclosConfigType;
+use App\Form\EmailAliasType;
 use App\Form\HelloAssoConfigType;
-use App\Payment\PaymentProcessor;
+use App\Form\ResetPasswordType;
+use App\Message\FetchClientPaymentsMessage;
 use App\Repository\ClientRepository;
 use App\Repository\EmailAliasRepository;
 use App\Repository\PaymentRepository;
@@ -27,9 +29,10 @@ use Symfony\Component\Form\FormError;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Component\Security\Http\Attribute\IsGranted;
-use Symfony\Component\PasswordHasher\Hasher\UserPasswordHasherInterface;
 
 #[Route(path: '/admin/clients', name: 'admin_client_')]
 #[IsGranted('ROLE_ADMIN')]
@@ -42,13 +45,13 @@ class ClientController extends AbstractController
         private readonly ClientRepository $clientRepository,
         private readonly EntityManagerInterface $entityManager,
         private readonly SecretEncryptor $secretEncryptor,
-        private readonly PaymentProcessor $paymentProcessor,
         private readonly ClientWizardState $wizardState,
         private readonly ClientLogoUploader $logoUploader,
         private readonly UserRepository $userRepository,
         private readonly UserPasswordHasherInterface $passwordHasher,
         private readonly PaymentRepository $paymentRepository,
         private readonly EmailAliasRepository $emailAliasRepository,
+        private readonly MessageBusInterface $messageBus,
     ) {
     }
 
@@ -117,7 +120,7 @@ class ClientController extends AbstractController
                 $this->entityManager->persist($alias);
                 $this->entityManager->flush();
 
-                $this->addFlash('success', sprintf('Les paiements de "%s" seront désormais crédités sur "%s".', $alias->getSourceEmail(), $alias->getTargetEmail()));
+                $this->addFlash('success', \sprintf('Les paiements de "%s" seront désormais crédités sur "%s".', $alias->getSourceEmail(), $alias->getTargetEmail()));
 
                 return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
             }
@@ -140,7 +143,7 @@ class ClientController extends AbstractController
         if ($this->isCsrfTokenValid('delete_email_alias_' . $alias->getId(), $request->request->get('_token'))) {
             $this->entityManager->remove($alias);
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('La règle pour "%s" a été supprimée.', $alias->getSourceEmail()));
+            $this->addFlash('success', \sprintf('La règle pour "%s" a été supprimée.', $alias->getSourceEmail()));
         }
 
         return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
@@ -172,7 +175,7 @@ class ClientController extends AbstractController
                 $this->entityManager->persist($user);
                 $this->entityManager->flush();
 
-                $this->addFlash('success', sprintf('Le compte "%s" a été créé pour %s.', $user->getEmail(), $client->getName()));
+                $this->addFlash('success', \sprintf('Le compte "%s" a été créé pour %s.', $user->getEmail(), $client->getName()));
 
                 return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
             }
@@ -196,7 +199,7 @@ class ClientController extends AbstractController
             $user->setPassword($this->passwordHasher->hashPassword($user, $form->getData()['plainPassword']));
             $this->entityManager->flush();
 
-            $this->addFlash('success', sprintf('Le mot de passe de "%s" a été réinitialisé.', $user->getEmail()));
+            $this->addFlash('success', \sprintf('Le mot de passe de "%s" a été réinitialisé.', $user->getEmail()));
 
             return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
         }
@@ -216,7 +219,7 @@ class ClientController extends AbstractController
         if ($this->isCsrfTokenValid('toggle_client_user_' . $user->getId(), $request->request->get('_token'))) {
             $user->setActive(!$user->isActive());
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('Le compte "%s" a été %s.', $user->getEmail(), $user->isActive() ? 'réactivé' : 'désactivé'));
+            $this->addFlash('success', \sprintf('Le compte "%s" a été %s.', $user->getEmail(), $user->isActive() ? 'réactivé' : 'désactivé'));
         }
 
         return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
@@ -239,7 +242,7 @@ class ClientController extends AbstractController
 
         $this->entityManager->remove($user);
         $this->entityManager->flush();
-        $this->addFlash('success', sprintf('Le compte "%s" a été supprimé.', $user->getEmail()));
+        $this->addFlash('success', \sprintf('Le compte "%s" a été supprimé.', $user->getEmail()));
 
         return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
     }
@@ -282,7 +285,7 @@ class ClientController extends AbstractController
         $this->entityManager->remove($client);
         $this->entityManager->flush();
 
-        $this->addFlash('success', sprintf('Le client "%s" a été supprimé.', $clientName));
+        $this->addFlash('success', \sprintf('Le client "%s" a été supprimé.', $clientName));
 
         return $this->redirectToRoute('admin_client_list');
     }
@@ -406,7 +409,7 @@ class ClientController extends AbstractController
             $this->entityManager->flush();
             $this->wizardState->clear();
 
-            $this->addFlash('success', sprintf('Le client "%s" a été créé.', $client->getName()));
+            $this->addFlash('success', \sprintf('Le client "%s" a été créé.', $client->getName()));
 
             return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
         }
@@ -481,7 +484,7 @@ class ClientController extends AbstractController
 
             $this->entityManager->persist($config);
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('Le formulaire HelloAsso "%s" a été ajouté.', $config->getLabel()));
+            $this->addFlash('success', \sprintf('Le formulaire HelloAsso "%s" a été ajouté.', $config->getLabel()));
 
             return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
         }
@@ -535,7 +538,7 @@ class ClientController extends AbstractController
 
         $config->setActive(!$config->isActive());
         $this->entityManager->flush();
-        $this->addFlash('success', sprintf('Le formulaire "%s" a été %s.', $config->getLabel(), $config->isActive() ? 'réactivé' : 'désactivé'));
+        $this->addFlash('success', \sprintf('Le formulaire "%s" a été %s.', $config->getLabel(), $config->isActive() ? 'réactivé' : 'désactivé'));
 
         return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
     }
@@ -574,7 +577,7 @@ class ClientController extends AbstractController
         $client->removeHelloAssoConfig($config);
         $this->entityManager->remove($config);
         $this->entityManager->flush();
-        $this->addFlash('success', sprintf('Le formulaire "%s" a été supprimé.', $label));
+        $this->addFlash('success', \sprintf('Le formulaire "%s" a été supprimé.', $label));
 
         return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
     }
@@ -636,12 +639,58 @@ class ClientController extends AbstractController
         ]);
     }
 
+    #[Route(path: '/{id}/personnalisation', requirements: ['id' => '\d+'], name: 'edit_customization', methods: ['GET', 'POST'])]
+    public function editCustomization(Client $client, Request $request): Response
+    {
+        $customization = $client->getCustomization();
+        $isNew = $customization === null;
+        if ($customization === null) {
+            $customization = new ClientCustomization();
+            $customization->setClient($client);
+        }
+
+        $form = $this->createForm(ClientCustomizationType::class, $customization);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            if ($isNew) {
+                $client->setCustomization($customization);
+                $this->entityManager->persist($customization);
+            }
+            $this->entityManager->flush();
+            $this->addFlash('success', 'La personnalisation du client a été mise à jour.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        return $this->render('admin/client/edit_customization.html.twig', [
+            'client' => $client,
+            'form' => $form,
+            'placeholders' => ClientCustomization::PLACEHOLDERS,
+            'emailTypeLabels' => ClientCustomization::EMAIL_TYPE_LABELS,
+        ]);
+    }
+
     #[Route(path: '/{id}/fetch', requirements: ['id' => '\d+'], name: 'fetch', methods: ['POST'])]
     public function fetch(Client $client, Request $request): Response
     {
         if ($this->isCsrfTokenValid('client_fetch_' . $client->getId(), $request->request->get('_token'))) {
-            $added = $this->paymentProcessor->fetchMissingPayments($client, attemptAutomaticCredit: true);
-            $this->addFlash('success', sprintf('%d paiement(s) récupéré(s) depuis HelloAsso.', $added));
+            // Off the request thread: pulling the history and crediting each
+            // discovered payment can be several HelloAsso/Cyclos round-trips.
+            $this->messageBus->dispatch(new FetchClientPaymentsMessage($client->getId(), attemptAutomaticCredit: true));
+            $this->addFlash('success', 'Synchronisation HelloAsso lancée. Les paiements récupérés apparaîtront dans la liste d\'ici quelques instants.');
+        }
+
+        return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+    }
+
+    #[Route(path: '/{id}/webhook/regenerer-jeton', requirements: ['id' => '\d+'], name: 'regenerate_webhook_token', methods: ['POST'])]
+    public function regenerateWebhookToken(Client $client, Request $request): Response
+    {
+        if ($this->isCsrfTokenValid('regenerate_webhook_token_' . $client->getId(), $request->request->get('_token'))) {
+            $client->regenerateWebhookToken();
+            $this->entityManager->flush();
+            $this->addFlash('success', 'Un nouveau jeton de webhook a été généré. Mettez à jour l\'URL de notification dans HelloAsso : les anciennes notifications ne seront plus acceptées.');
         }
 
         return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);

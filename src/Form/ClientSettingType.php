@@ -28,7 +28,7 @@ class ClientSettingType extends AbstractType
             ])
             ->add('mailRecipient', EmailType::class, [
                 'label' => 'Mail principal',
-                'help' => "Adresse recevant les alertes techniques (et les notifications de paiement si activées ci-dessous).",
+                'help' => 'Adresse recevant les alertes techniques (et les notifications de paiement si activées ci-dessous).',
                 'row_attr' => ['class' => 'form-row--span2'],
             ])
             ->add('notifySuccessOnPayment', CheckboxType::class, [

@@ -18,6 +18,10 @@ use Symfony\Component\Process\Process;
  * the documentation. Each step still runs a fixed binary with fixed
  * arguments (no string concatenation from user input), and the whole thing
  * is gated behind ROLE_CEO specifically (not just ROLE_DEVELOPER).
+ *
+ * Concurrency: guarded by an exclusive lock on var/deploy.lock so two clicks
+ * (or a click during a scheduled deploy) can't run git pull / composer /
+ * migrations on top of each other.
  */
 class DeploymentRunner
 {
@@ -29,9 +33,35 @@ class DeploymentRunner
     }
 
     /**
-     * @return array{success: bool, steps: array<int, array{label: string, command: string, exitCode: ?int, output: string}>}
+     * @return array{
+     *     success: bool,
+     *     locked: bool,
+     *     steps: array<int, array{label: string, command: string, exitCode: ?int, output: string, optional?: bool}>
+     * }
      */
     public function run(): array
+    {
+        $lockHandle = @fopen($this->projectDir . '/var/deploy.lock', 'c');
+        if ($lockHandle === false || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
+            if (\is_resource($lockHandle)) {
+                fclose($lockHandle);
+            }
+
+            return ['success' => false, 'locked' => true, 'steps' => []];
+        }
+
+        try {
+            return $this->runSteps();
+        } finally {
+            flock($lockHandle, LOCK_UN);
+            fclose($lockHandle);
+        }
+    }
+
+    /**
+     * @return array{success: bool, locked: bool, steps: array<int, array<string, mixed>>}
+     */
+    private function runSteps(): array
     {
         $steps = [
             ['label' => 'Récupération du code (git pull)', 'command' => ['git', 'pull', '--ff-only']],
@@ -44,13 +74,20 @@ class DeploymentRunner
             // works via cache:clear alone, which is why this went unnoticed until the
             // first PR to add brand new controllers). See "Incidents résolus".
             ['label' => 'Compilation des assets (AssetMapper)', 'command' => ['php', 'bin/console', 'asset-map:compile', '--no-interaction']],
+            // Best-effort: reload the workers so they pick up the new message-handler
+            // code. Needs a passwordless sudoers rule (see the deployment doc); if it
+            // is absent this step reports "à faire manuellement" without failing the
+            // deploy — the code itself is already live.
+            ['label' => 'Redémarrage des workers', 'command' => ['sudo', '-n', 'systemctl', 'restart', 'cyllos-worker', 'cyllos-scheduler'], 'optional' => true],
         ];
 
         $results = [];
         $success = true;
 
         foreach ($steps as $step) {
-            if (!$success) {
+            $optional = $step['optional'] ?? false;
+
+            if (!$success && !$optional) {
                 $results[] = ['label' => $step['label'], 'command' => implode(' ', $step['command']), 'exitCode' => null, 'output' => '(ignoré — étape précédente en échec)'];
 
                 continue;
@@ -59,18 +96,24 @@ class DeploymentRunner
             $process = new Process($step['command'], $this->projectDir, null, null, self::TIMEOUT_SECONDS);
             $process->run();
 
+            $output = trim($process->getOutput() . $process->getErrorOutput());
+            if ($optional && !$process->isSuccessful()) {
+                $output = "Redémarrage automatique indisponible (pas de règle sudo). À faire manuellement :\n  sudo systemctl restart cyllos-worker cyllos-scheduler\n\n" . $output;
+            }
+
             $results[] = [
                 'label' => $step['label'],
                 'command' => implode(' ', $step['command']),
                 'exitCode' => $process->getExitCode(),
-                'output' => trim($process->getOutput() . $process->getErrorOutput()),
+                'output' => $output,
+                'optional' => $optional,
             ];
 
-            if (!$process->isSuccessful()) {
+            if (!$process->isSuccessful() && !$optional) {
                 $success = false;
             }
         }
 
-        return ['success' => $success, 'steps' => $results];
+        return ['success' => $success, 'locked' => false, 'steps' => $results];
     }
 }

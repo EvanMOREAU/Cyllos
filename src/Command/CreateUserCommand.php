@@ -54,7 +54,7 @@ class CreateUserCommand extends Command
         $clientSlug = $input->getOption('client');
 
         if ($this->userRepository->findOneBy(['email' => $email]) !== null) {
-            $io->error(sprintf('A user with email "%s" already exists.', $email));
+            $io->error(\sprintf('A user with email "%s" already exists.', $email));
 
             return Command::FAILURE;
         }
@@ -69,7 +69,7 @@ class CreateUserCommand extends Command
         if ($clientSlug !== null) {
             $client = $this->clientRepository->findOneBySlug($clientSlug);
             if ($client === null) {
-                $io->error(sprintf('No client found with slug "%s".', $clientSlug));
+                $io->error(\sprintf('No client found with slug "%s".', $clientSlug));
 
                 return Command::FAILURE;
             }
@@ -98,7 +98,7 @@ class CreateUserCommand extends Command
         $this->entityManager->persist($user);
         $this->entityManager->flush();
 
-        $io->success(sprintf('User "%s" created with roles [%s]%s.', $email, implode(', ', $roles), $client instanceof Client ? ' for client ' . $client->getName() : ''));
+        $io->success(\sprintf('User "%s" created with roles [%s]%s.', $email, implode(', ', $roles), $client instanceof Client ? ' for client ' . $client->getName() : ''));
 
         return Command::SUCCESS;
     }

@@ -65,7 +65,7 @@ class EmailAliasController extends AbstractController
                 $this->entityManager->persist($alias);
                 $this->entityManager->flush();
 
-                $this->addFlash('success', sprintf('Vos paiements de "%s" seront désormais crédités sur "%s".', $alias->getSourceEmail(), $alias->getTargetEmail()));
+                $this->addFlash('success', \sprintf('Vos paiements de "%s" seront désormais crédités sur "%s".', $alias->getSourceEmail(), $alias->getTargetEmail()));
 
                 return $this->redirectToRoute('app_email_alias_list');
             }
@@ -90,7 +90,7 @@ class EmailAliasController extends AbstractController
         if ($this->isCsrfTokenValid('delete_email_alias_' . $alias->getId(), $request->request->get('_token'))) {
             $this->entityManager->remove($alias);
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('La règle pour "%s" a été supprimée.', $alias->getSourceEmail()));
+            $this->addFlash('success', \sprintf('La règle pour "%s" a été supprimée.', $alias->getSourceEmail()));
         }
 
         return $this->redirectToRoute('app_email_alias_list');

@@ -35,7 +35,7 @@ class ApiCallLogger
     ): void {
         $log = new ActivityLog();
         $log->setAction('api.' . $service);
-        $log->setSummary($summary ?? sprintf('%s %s', $method, $this->pathOnly($url)));
+        $log->setSummary($summary ?? \sprintf('%s %s', $method, $this->pathOnly($url)));
         $log->setApiService($service);
         $log->setApiMethod($method);
         $log->setApiUrl($url);

@@ -68,7 +68,7 @@ class ActivityLogController extends AbstractController
         }
 
         $deleted = $this->activityLogRepository->deleteAll();
-        $this->addFlash('success', sprintf('%d entrée(s) supprimée(s) du journal.', $deleted));
+        $this->addFlash('success', \sprintf('%d entrée(s) supprimée(s) du journal.', $deleted));
 
         return $this->redirectToRoute('dev_log_list');
     }

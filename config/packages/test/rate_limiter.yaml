@@ -1,0 +1,14 @@
+framework:
+    cache:
+        pools:
+            cache.rate_limiter_test:
+                adapter: cache.adapter.array
+    rate_limiter:
+        # In-memory storage so limiter state does not leak between test cases
+        # (the default filesystem pool persists across kernel boots and reruns),
+        # and a tiny bucket with negligible refill so the throttle is reachable
+        # within a test without firing dozens of requests.
+        webhook:
+            cache_pool: 'cache.rate_limiter_test'
+            limit: 5
+            rate: { interval: '1 hour', amount: 5 }

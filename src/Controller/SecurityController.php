@@ -32,7 +32,7 @@ class SecurityController extends AbstractController
     public function home(): Response
     {
         if ($this->isGranted('ROLE_ADMIN')) {
-            return $this->redirectToRoute('admin_client_list');
+            return $this->redirectToRoute('admin_dashboard');
         }
 
         return $this->redirectToRoute('app_payment_list');

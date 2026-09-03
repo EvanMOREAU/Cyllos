@@ -7,11 +7,11 @@ use App\Entity\Client;
 use App\Entity\Payment;
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Attribute\AsDoctrineListener;
-use Doctrine\ORM\Events;
 use Doctrine\ORM\Event\PostFlushEventArgs;
 use Doctrine\ORM\Event\PostPersistEventArgs;
 use Doctrine\ORM\Event\PostRemoveEventArgs;
 use Doctrine\ORM\Event\PostUpdateEventArgs;
+use Doctrine\ORM\Events;
 use Symfony\Bundle\SecurityBundle\Security;
 
 /**
