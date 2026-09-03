@@ -34,6 +34,38 @@ class ActivityLogRepository extends ServiceEntityRepository
         return $qb->getQuery()->getResult();
     }
 
+    /**
+     * Most recent audit lines only — outbound API call traces (action "api.*")
+     * excluded, for the dashboard's activity feed.
+     *
+     * @return ActivityLog[]
+     */
+    public function findRecentAudit(int $limit = 8): array
+    {
+        return $this->createQueryBuilder('l')
+            ->andWhere('l.action NOT LIKE :apiPrefix')
+            ->setParameter('apiPrefix', 'api.%')
+            ->orderBy('l.createdAt', 'DESC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
+     * The latest recorded call to one external API ("helloasso" / "cyclos"),
+     * for the dashboard's connection-health card. Null if none recorded yet.
+     */
+    public function lastApiCall(string $service): ?ActivityLog
+    {
+        return $this->createQueryBuilder('l')
+            ->andWhere('l.apiService = :service')
+            ->setParameter('service', $service)
+            ->orderBy('l.createdAt', 'DESC')
+            ->setMaxResults(1)
+            ->getQuery()
+            ->getOneOrNullResult();
+    }
+
     public function deleteAll(): int
     {
         return (int) $this->createQueryBuilder('l')

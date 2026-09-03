@@ -80,6 +80,12 @@ class DashboardControllerTest extends WebTestCase
         self::assertResponseIsSuccessful();
         self::assertSelectorTextContains('.kpi-grid', '3'); // 3 payments in window
         self::assertStringContainsString('Erreur de test Cyclos', $crawler->filter('body')->html());
+
+        // Money figure (2 credited payments of 10.00) and the per-client table.
+        $html = $crawler->filter('body')->html();
+        self::assertStringContainsString('20,00 €', $html);
+        self::assertStringContainsString('Détail par client', $html);
+        self::assertSelectorTextContains('details', 'Dash Co');
     }
 
     private function persistFullClient(): Client

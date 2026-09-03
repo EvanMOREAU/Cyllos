@@ -2,15 +2,17 @@
 
 namespace App\Notification;
 
+use App\Entity\Client;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
 use Symfony\Component\Mailer\MailerInterface;
 use Symfony\Component\Mime\Email;
-use Symfony\Contracts\Translation\TranslatorInterface;
 
 /**
  * Sends plain-text operational emails (late payment, failure, success...) to a
- * client's configured mail recipient(s). Ported from MailService.java.
+ * client's configured recipient(s). Subject and body are produced by
+ * EmailComposer, which applies the client's ClientCustomization (template
+ * overrides, subject prefix, footer) on top of the global defaults.
  */
 class NotificationMailer
 {
@@ -19,25 +21,22 @@ class NotificationMailer
     public function __construct(
         private readonly MailerInterface $mailer,
         private readonly LoggerInterface $logger,
-        private readonly TranslatorInterface $translator,
+        private readonly EmailComposer $composer,
         private readonly string $fromAddress,
     ) {
     }
 
     /**
-     * Sends a notification whose subject and body come from the "emails"
-     * translation domain (translations/emails.<locale>.yaml). $params fills the
-     * body placeholders (%id%, %amount%, %errors%...).
+     * Composes the "$type" notification for $client (applying any
+     * per-client customization) and sends it to $recipients.
      *
-     * @param array<string, string|int|float> $params
+     * @param array<string, string|int|float> $params values for the %placeholders%
      */
-    public function sendTranslated(string $recipients, string $subjectId, string $bodyId, array $params = []): void
+    public function sendForClient(Client $client, string $recipients, string $type, array $params = []): void
     {
-        $this->send(
-            $recipients,
-            $this->translator->trans($subjectId, [], 'emails'),
-            $this->translator->trans($bodyId, $params, 'emails'),
-        );
+        $composed = $this->composer->compose($client, $type, $params);
+
+        $this->send($recipients, $composed->subject, $composed->body);
     }
 
     public function send(string $recipients, string $subject, string $body): void

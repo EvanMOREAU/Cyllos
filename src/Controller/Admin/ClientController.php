@@ -4,9 +4,11 @@ namespace App\Controller\Admin;
 
 use App\Client\ClientLogoUploader;
 use App\Entity\Client;
+use App\Entity\ClientCustomization;
 use App\Entity\EmailAlias;
 use App\Entity\HelloAssoConfig;
 use App\Entity\User;
+use App\Form\ClientCustomizationType;
 use App\Form\ClientInfoType;
 use App\Form\ClientSettingType;
 use App\Form\ClientUserType;
@@ -634,6 +636,38 @@ class ClientController extends AbstractController
             'client' => $client,
             'form' => $form,
             'section_title' => 'Réglages',
+        ]);
+    }
+
+    #[Route(path: '/{id}/personnalisation', requirements: ['id' => '\d+'], name: 'edit_customization', methods: ['GET', 'POST'])]
+    public function editCustomization(Client $client, Request $request): Response
+    {
+        $customization = $client->getCustomization();
+        $isNew = $customization === null;
+        if ($customization === null) {
+            $customization = new ClientCustomization();
+            $customization->setClient($client);
+        }
+
+        $form = $this->createForm(ClientCustomizationType::class, $customization);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            if ($isNew) {
+                $client->setCustomization($customization);
+                $this->entityManager->persist($customization);
+            }
+            $this->entityManager->flush();
+            $this->addFlash('success', 'La personnalisation du client a été mise à jour.');
+
+            return $this->redirectToRoute('admin_client_show', ['id' => $client->getId()]);
+        }
+
+        return $this->render('admin/client/edit_customization.html.twig', [
+            'client' => $client,
+            'form' => $form,
+            'placeholders' => ClientCustomization::PLACEHOLDERS,
+            'emailTypeLabels' => ClientCustomization::EMAIL_TYPE_LABELS,
         ]);
     }
 

@@ -4,6 +4,7 @@ namespace App\Controller;
 
 use App\Payment\PaymentProcessor;
 use App\Repository\ClientRepository;
+use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -14,11 +15,15 @@ use Symfony\Component\Routing\Attribute\Route;
 
 class WebhookController extends AbstractController
 {
+    /** A legacy-URL hit is recorded at most once per client per this interval. */
+    private const LEGACY_SEEN_THROTTLE = '-1 hour';
+
     public function __construct(
         private readonly ClientRepository $clientRepository,
         private readonly PaymentProcessor $paymentProcessor,
         private readonly LoggerInterface $logger,
         private readonly RateLimiterFactoryInterface $webhookLimiter,
+        private readonly EntityManagerInterface $entityManager,
     ) {
     }
 
@@ -74,6 +79,17 @@ class WebhookController extends AbstractController
     public function legacy(string $clientSlug): Response
     {
         $this->logger->warning('HelloAsso webhook called without a token for client "{slug}" — update the notification URL in HelloAsso to /webhook/helloasso/{slug}/<token> (see the admin client page)', ['slug' => $clientSlug]);
+
+        // Leave a trace the admin dashboard can surface, but only for a real
+        // active client and at most hourly — this endpoint is unauthenticated.
+        $client = $this->clientRepository->findOneBySlug($clientSlug);
+        if ($client !== null && $client->isActive()) {
+            $lastSeen = $client->getLegacyWebhookLastSeenAt();
+            if ($lastSeen === null || $lastSeen < new \DateTimeImmutable(self::LEGACY_SEEN_THROTTLE)) {
+                $client->setLegacyWebhookLastSeenAt(new \DateTimeImmutable());
+                $this->entityManager->flush();
+            }
+        }
 
         return new Response(status: Response::HTTP_NOT_FOUND);
     }

@@ -159,8 +159,8 @@ class PaymentProcessorTest extends TestCase
         $cyclosClient->expects(self::never())->method('findUserByEmail');
 
         $mailer = $this->createMock(NotificationMailer::class);
-        $mailer->expects(self::once())->method('sendTranslated')
-            ->with('ops@example.com', 'over_limit.subject', 'over_limit.body', self::anything());
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'over_limit', self::anything());
 
         $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
 
@@ -187,8 +187,8 @@ class PaymentProcessorTest extends TestCase
         $cyclosClient->expects(self::never())->method('findUserByEmail');
 
         $mailer = $this->createMock(NotificationMailer::class);
-        $mailer->expects(self::once())->method('sendTranslated')
-            ->with('ops@example.com', 'too_late.subject', 'too_late.body', self::anything());
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'too_late', self::anything());
 
         $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
 
@@ -381,8 +381,8 @@ class PaymentProcessorTest extends TestCase
         $cyclosClient->expects(self::never())->method('findUserByEmail');
 
         $mailer = $this->createMock(NotificationMailer::class);
-        $mailer->expects(self::once())->method('sendTranslated')
-            ->with('ops@example.com', 'too_late.subject', 'too_late.body', self::anything());
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'too_late', self::anything());
 
         $this->makeProcessorForQueued($payment, $cyclosClient, $mailer)->processQueuedPayment(4242, reportedWaiting: false);
 
@@ -398,8 +398,8 @@ class PaymentProcessorTest extends TestCase
         $cyclosClient->expects(self::never())->method('findUserByEmail');
 
         $mailer = $this->createMock(NotificationMailer::class);
-        $mailer->expects(self::once())->method('sendTranslated')
-            ->with('ops@example.com', 'waiting.subject', 'waiting.body', self::anything());
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'waiting', self::anything());
 
         $this->makeProcessorForQueued($payment, $cyclosClient, $mailer)->processQueuedPayment(4242, reportedWaiting: true);
 
@@ -416,7 +416,7 @@ class PaymentProcessorTest extends TestCase
         $cyclosClient->expects(self::never())->method('findUserByEmail');
 
         $mailer = $this->createMock(NotificationMailer::class);
-        $mailer->expects(self::never())->method('sendTranslated');
+        $mailer->expects(self::never())->method('sendForClient');
 
         $this->makeProcessorForQueued($payment, $cyclosClient, $mailer)->processQueuedPayment(4242, reportedWaiting: false);
 

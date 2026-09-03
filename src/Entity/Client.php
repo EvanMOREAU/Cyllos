@@ -45,6 +45,16 @@ class Client
     private string $webhookToken;
 
     /**
+     * Last time HelloAsso hit the token-less legacy webhook URL for this
+     * client (see WebhookController::legacy()). A recent value means the
+     * client's notification URL in HelloAsso still needs the token appended;
+     * surfaced on the admin dashboard. Written at most hourly to keep the
+     * unauthenticated legacy endpoint cheap.
+     */
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $legacyWebhookLastSeenAt = null;
+
+    /**
      * Stored filename of the client's logo in public/uploads/client-logos/, if any.
      */
     #[ORM\Column(length: 255, nullable: true)]
@@ -75,6 +85,14 @@ class Client
 
     #[ORM\OneToOne(mappedBy: 'client', targetEntity: ClientSetting::class, cascade: ['persist', 'remove'])]
     private ?ClientSetting $setting = null;
+
+    /**
+     * Optional per-client cosmetic overrides (e-mail wording, Cyclos
+     * description prefix...). Absent for most clients — a null relation means
+     * "application defaults everywhere", see ClientCustomization.
+     */
+    #[ORM\OneToOne(mappedBy: 'client', targetEntity: ClientCustomization::class, cascade: ['persist', 'remove'])]
+    private ?ClientCustomization $customization = null;
 
     #[ORM\OneToMany(mappedBy: 'client', targetEntity: Payment::class)]
     private Collection $payments;
@@ -150,6 +168,18 @@ class Client
     public function regenerateWebhookToken(): static
     {
         $this->webhookToken = self::generateWebhookToken();
+
+        return $this;
+    }
+
+    public function getLegacyWebhookLastSeenAt(): ?\DateTimeImmutable
+    {
+        return $this->legacyWebhookLastSeenAt;
+    }
+
+    public function setLegacyWebhookLastSeenAt(?\DateTimeImmutable $legacyWebhookLastSeenAt): static
+    {
+        $this->legacyWebhookLastSeenAt = $legacyWebhookLastSeenAt;
 
         return $this;
     }
@@ -249,6 +279,21 @@ class Client
         $this->setting = $setting;
         if ($setting !== null && $setting->getClient() !== $this) {
             $setting->setClient($this);
+        }
+
+        return $this;
+    }
+
+    public function getCustomization(): ?ClientCustomization
+    {
+        return $this->customization;
+    }
+
+    public function setCustomization(?ClientCustomization $customization): static
+    {
+        $this->customization = $customization;
+        if ($customization !== null && $customization->getClient() !== $this) {
+            $customization->setClient($this);
         }
 
         return $this;

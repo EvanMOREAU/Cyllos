@@ -3,7 +3,6 @@
 namespace App\Payment;
 
 use App\Entity\Client;
-use App\Entity\ClientSetting;
 use App\Entity\HelloAssoConfig;
 use App\Entity\Payment;
 use App\Entity\PaymentStatus;
@@ -12,6 +11,7 @@ use App\Integration\HelloAsso\HelloAssoClient;
 use App\Integration\HelloAsso\HelloAssoFetchedPayment;
 use App\Integration\HelloAsso\HelloAssoNotificationPayload;
 use App\Message\ProcessPaymentMessage;
+use App\Notification\EmailComposer;
 use App\Notification\NotificationMailer;
 use App\Repository\EmailAliasRepository;
 use App\Repository\HelloAssoConfigRepository;
@@ -76,7 +76,7 @@ class PaymentProcessor
             if (!$alreadyKnown) {
                 $payment = $this->persist($this->buildPayment($client, $haConfig, $parsed), PaymentStatus::TooHigh);
                 if ($payment !== null) {
-                    $this->notifyOverLimit($setting, $payment);
+                    $this->notifyOverLimit($client, $payment);
                 }
             }
 
@@ -195,12 +195,10 @@ class PaymentProcessor
      */
     private function ingestFetchedPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoFetchedPayment $item): void
     {
-        $setting = $client->getSetting();
-
         if ($item->amountCents > $haConfig->getMaxAmount() * 100) {
             $payment = $this->persist($this->buildPayment($client, $haConfig, $item), PaymentStatus::TooHigh);
             if ($payment !== null) {
-                $this->notifyOverLimit($setting, $payment);
+                $this->notifyOverLimit($client, $payment);
             }
 
             return;
@@ -231,12 +229,7 @@ class PaymentProcessor
         if ($this->isLate($payment->getPaymentDate())) {
             $payment->setStatus(PaymentStatus::TooLate);
             $this->entityManager->flush();
-            $this->mailer->sendTranslated(
-                $setting->getMailRecipient(),
-                'too_late.subject',
-                'too_late.body',
-                ['%id%' => $payment->getHelloAssoPaymentId()],
-            );
+            $this->mailer->sendForClient($client, $setting->getMailRecipient(), 'too_late', $this->emailParams($client, $payment));
 
             return new PaymentProcessingResult(PaymentStatus::TooLate);
         }
@@ -244,12 +237,7 @@ class PaymentProcessor
         if ($reportedWaiting) {
             $payment->setStatus(PaymentStatus::Waiting);
             $this->entityManager->flush();
-            $this->mailer->sendTranslated(
-                $setting->getMailRecipient(),
-                'waiting.subject',
-                'waiting.body',
-                ['%id%' => $payment->getHelloAssoPaymentId()],
-            );
+            $this->mailer->sendForClient($client, $setting->getMailRecipient(), 'waiting', $this->emailParams($client, $payment));
 
             return new PaymentProcessingResult(PaymentStatus::Waiting);
         }
@@ -261,24 +249,14 @@ class PaymentProcessor
             $this->entityManager->flush();
 
             if ($setting->isNotifySuccessOnPayment() && $client->getContactEmail() !== null) {
-                $this->mailer->sendTranslated(
-                    $client->getContactEmail(),
-                    'success.subject',
-                    'success.body',
-                    ['%id%' => $payment->getHelloAssoPaymentId(), '%amount%' => \sprintf('%.2f', $payment->getAmount())],
-                );
+                $this->mailer->sendForClient($client, $client->getContactEmail(), 'success', $this->emailParams($client, $payment));
             }
 
             return new PaymentProcessingResult(PaymentStatus::SuccessAuto, $result->errors);
         }
 
         if ($setting->isNotifyFailureOnPayment() && $client->getContactEmail() !== null) {
-            $this->mailer->sendTranslated(
-                $client->getContactEmail(),
-                'failure.subject',
-                'failure.body',
-                ['%id%' => $payment->getHelloAssoPaymentId(), '%amount%' => \sprintf('%.2f', $payment->getAmount())],
-            );
+            $this->mailer->sendForClient($client, $client->getContactEmail(), 'failure', $this->emailParams($client, $payment));
         }
 
         return $result;
@@ -290,14 +268,15 @@ class PaymentProcessor
      */
     public function creditManually(Payment $payment): PaymentProcessingResult
     {
-        $result = $this->creditCyclosAccount($payment->getClient(), $payment);
+        $client = $payment->getClient();
+        $result = $this->creditCyclosAccount($client, $payment);
 
         if (!$result->isSuccessful()) {
-            $this->mailer->sendTranslated(
-                $payment->getClient()->getSetting()->getMailRecipient(),
-                'manual_error.subject',
-                'manual_error.body',
-                ['%id%' => $payment->getHelloAssoPaymentId(), '%errors%' => implode("\n", $result->errors)],
+            $this->mailer->sendForClient(
+                $client,
+                $client->getSetting()->getMailRecipient(),
+                'manual_error',
+                $this->emailParams($client, $payment) + ['%errors%' => implode("\n", $result->errors)],
             );
         }
 
@@ -345,9 +324,21 @@ class PaymentProcessor
             return $this->fail($payment, \sprintf("Le groupe Cyclos de l'utilisateur (%s) n'est pas autorisé à recevoir des paiements automatiques", $user->groupInternalName));
         }
 
-        $description = CyclosClient::PAYMENT_DESCRIPTION_PREFIX . $payment->getHelloAssoPaymentId();
+        $customPrefix = $client->getCustomization()?->getCyclosDescriptionPrefix();
+        $prefix = ($customPrefix !== null && $customPrefix !== '')
+            ? $customPrefix
+            : CyclosClient::PAYMENT_DESCRIPTION_PREFIX;
+        $description = $prefix . $payment->getHelloAssoPaymentId();
 
-        if ($this->cyclosClient->hasAlreadyCreditedPayment($cyclosConfig, $email, $description)) {
+        // Also look for the default/legacy wording: a client that switched its
+        // description prefix must not get a payment credited twice because the
+        // earlier credit is recorded in Cyclos under the old description.
+        $duplicateCandidates = array_values(array_unique([
+            $description,
+            CyclosClient::PAYMENT_DESCRIPTION_PREFIX . $payment->getHelloAssoPaymentId(),
+        ]));
+
+        if ($this->cyclosClient->hasAlreadyCreditedPayment($cyclosConfig, $email, $duplicateCandidates)) {
             return $this->fail($payment, 'Paiement déjà réalisé dans Cyclos');
         }
 
@@ -418,14 +409,39 @@ class PaymentProcessor
         return $payment;
     }
 
-    private function notifyOverLimit(ClientSetting $setting, Payment $payment): void
+    private function notifyOverLimit(Client $client, Payment $payment): void
     {
-        $this->mailer->sendTranslated(
-            $setting->getMailRecipient(),
-            'over_limit.subject',
-            'over_limit.body',
-            ['%id%' => $payment->getHelloAssoPaymentId(), '%amount%' => \sprintf('%.2f', $payment->getAmount())],
+        $this->mailer->sendForClient(
+            $client,
+            $client->getSetting()->getMailRecipient(),
+            'over_limit',
+            $this->emailParams($client, $payment),
         );
+    }
+
+    /**
+     * The %placeholder% values shared by every payment notification. Callers
+     * merge in any type-specific extra (e.g. '%errors%' for manual_error).
+     * A placeholder a given template doesn't use is simply ignored.
+     *
+     * @return array<string, string|int>
+     */
+    private function emailParams(Client $client, Payment $payment): array
+    {
+        $mode = $client->getSetting()->isPaymentCyclosEnabled()
+            ? EmailComposer::REAL_MODE_LABEL
+            : ($client->getCustomization()?->getPreviewModeLabel() ?? EmailComposer::DEFAULT_PREVIEW_MODE_LABEL);
+
+        return [
+            '%id%' => $payment->getHelloAssoPaymentId(),
+            '%amount%' => \sprintf('%.2f', $payment->getAmount()),
+            '%payer%' => trim($payment->getPayerFirstName() . ' ' . $payment->getPayerLastName()),
+            '%payer_email%' => $payment->getPayerEmail(),
+            '%form%' => $payment->getHelloAssoConfig()->getLabel(),
+            '%date%' => $payment->getPaymentDate()->format('d/m/Y'),
+            '%client%' => $client->getName(),
+            '%mode%' => $mode,
+        ];
     }
 
     /**

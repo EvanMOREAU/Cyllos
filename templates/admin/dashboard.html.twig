@@ -17,6 +17,8 @@
     'badge--todo': 'var(--color-text-tertiary)',
 } %}
 
+{% macro money(amount) %}{{ amount|number_format(2, ',', ' ') }} €{% endmacro %}
+
 {% block body %}
     <div class="kpi-grid">
         <div class="kpi">
@@ -26,15 +28,17 @@
         <a class="kpi" href="{{ path('admin_payment_list', {status: 'success'}) }}">
             <div class="kpi__value">{{ credited }}</div>
             <div class="kpi__label">Crédités</div>
+            <div class="kpi__sub">{{ _self.money(amounts.credited) }}</div>
         </a>
         <a class="kpi {{ failed > 0 ? 'kpi--danger' }}" href="{{ path('admin_payment_list', {status: 'fail'}) }}">
             <div class="kpi__value">{{ failed }}</div>
             <div class="kpi__label">Échecs</div>
-            <div class="kpi__sub">{{ failRate }} % des paiements</div>
+            <div class="kpi__sub">{{ failRate }} % · {{ _self.money(amounts.failed) }}</div>
         </a>
         <a class="kpi {{ toHandle > 0 ? 'kpi--warn' }}" href="{{ path('admin_payment_list', {status: 'todo'}) }}">
             <div class="kpi__value">{{ toHandle }}</div>
             <div class="kpi__label">À traiter</div>
+            <div class="kpi__sub">{{ _self.money(amounts.toHandle) }}</div>
         </a>
         <div class="kpi {{ queue.failed > 0 ? 'kpi--danger' : (queue.oldestPendingSeconds is not null and queue.oldestPendingSeconds > 300 ? 'kpi--warn') }}">
             <div class="kpi__value">{{ queue.pending }}</div>
@@ -71,7 +75,7 @@
         </div>
     {% endif %}
 
-    <div class="dashboard-cols">
+    <div class="dashboard-cols" style="margin-bottom: 1.5rem;">
         <div class="summary-card">
             <div class="summary-card__header">
                 <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('building') }}</span> Clients silencieux</div>
@@ -118,4 +122,131 @@
             </div>
         </div>
     </div>
+
+    <div class="dashboard-cols" style="margin-bottom: 1.5rem;">
+        <div class="summary-card">
+            <div class="summary-card__header">
+                <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('inbox') }}</span> Santé des connexions</div>
+            </div>
+            <div class="summary-card__body">
+                <dl class="kv-list">
+                    {% for service, label in {'helloasso': 'HelloAsso', 'cyclos': 'Cyclos'} %}
+                        {% set call = apiHealth[service] %}
+                        <div class="kv-row">
+                            <dt>{{ label }}</dt>
+                            <dd>
+                                {% if call is null %}
+                                    <span class="text-muted">aucun appel enregistré</span>
+                                {% else %}
+                                    {% set ok = call.apiStatusCode is not null and call.apiStatusCode < 300 %}
+                                    <span class="status-pill"><span class="dot {{ ok ? 'dot--active' : 'dot--inactive' }}"></span> HTTP {{ call.apiStatusCode ?? '?' }}</span>
+                                    <span class="text-muted">· {{ call.createdAt|date('d/m/Y H:i') }}</span>
+                                {% endif %}
+                            </dd>
+                        </div>
+                    {% endfor %}
+                </dl>
+                {% if legacyWebhookClients is not empty %}
+                    <p class="text-sm" style="margin-top: .75rem; color: var(--color-warning);">
+                        {{ icons.render('rule') }} URL de webhook sans jeton encore utilisée ({{ windowDays }} j) — mettre à jour côté HelloAsso :
+                    </p>
+                    <dl class="kv-list">
+                        {% for client in legacyWebhookClients %}
+                            <div class="kv-row">
+                                <dt><a href="{{ path('admin_client_show', {id: client.id}) }}">{{ client.name }}</a></dt>
+                                <dd>vu {{ client.legacyWebhookLastSeenAt|date('d/m/Y H:i') }}</dd>
+                            </div>
+                        {% endfor %}
+                    </dl>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-card__header">
+                <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('rule') }}</span> Activité récente</div>
+                {% if is_granted('ROLE_DEVELOPER') %}<a class="btn btn--ghost btn--sm" href="{{ path('dev_log_list') }}">Journal</a>{% endif %}
+            </div>
+            <div class="summary-card__body">
+                {% if recentActivity is empty %}
+                    <p class="text-muted text-sm">Aucune activité enregistrée.</p>
+                {% else %}
+                    <dl class="kv-list">
+                        {% for entry in recentActivity %}
+                            <div class="kv-row">
+                                <dt>
+                                    <code>{{ entry.action }}</code>
+                                    <span class="text-muted">· {{ entry.createdAt|date('d/m H:i') }}</span>
+                                </dt>
+                                <dd>{{ entry.summary ?: (entry.actorEmail ?: '—') }}</dd>
+                            </div>
+                        {% endfor %}
+                    </dl>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    {% if perClient is not empty %}
+        <details class="summary-card" style="margin-bottom: 1.5rem;">
+            <summary class="summary-card__header" style="cursor: pointer;">
+                <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('clients') }}</span> Détail par client ({{ windowDays }} j)</div>
+                <span class="text-muted text-sm">{{ perClient|length }} client{{ perClient|length > 1 ? 's' : '' }}</span>
+            </summary>
+            <div class="summary-card__body" style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Client</th>
+                            <th>Mode</th>
+                            <th style="text-align: right;">Reçus</th>
+                            <th style="text-align: right;">Crédités</th>
+                            <th style="text-align: right;">Échecs</th>
+                            <th style="text-align: right;">À traiter</th>
+                            <th style="text-align: right;">Montant crédité</th>
+                            <th>Dernier paiement</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for row in perClient %}
+                            <tr>
+                                <td class="cell-primary"><a href="{{ path('admin_client_show', {id: row.clientId}) }}">{{ row.name }}</a></td>
+                                <td>
+                                    <span class="status-pill"><span class="dot {{ row.cyclosEnabled ? 'dot--active' : 'dot--inactive' }}"></span> {{ row.cyclosEnabled ? 'Réel' : 'Aperçu' }}</span>
+                                    {% if not row.automaticEnabled %}<span class="text-muted text-sm"> · manuel</span>{% endif %}
+                                </td>
+                                <td style="text-align: right;">{{ row.total }}</td>
+                                <td style="text-align: right;">{{ row.credited }}</td>
+                                <td style="text-align: right;{{ row.failed > 0 ? ' color: var(--color-danger); font-weight: 600;' }}">{{ row.failed }}</td>
+                                <td style="text-align: right;{{ row.toHandle > 0 ? ' color: var(--color-warning); font-weight: 600;' }}">{{ row.toHandle }}</td>
+                                <td style="text-align: right;">{{ _self.money(row.amountCredited) }}</td>
+                                <td>{{ row.lastPaymentAt ? row.lastPaymentAt|date('d/m/Y H:i') : '—' }}</td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </details>
+    {% endif %}
+
+    {% if queue.failed > 0 %}
+        <details class="summary-card" style="margin-bottom: 1.5rem; border-color: var(--color-danger);" open>
+            <summary class="summary-card__header" style="cursor: pointer;">
+                <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('x') }}</span> File « failed » — {{ queue.failed }} message{{ queue.failed > 1 ? 's' : '' }}</div>
+            </summary>
+            <div class="summary-card__body">
+                <dl class="kv-list">
+                    {% for msg in failedMessages %}
+                        <div class="kv-row">
+                            <dt><code>#{{ msg.id }}</code> {{ msg.message }}<span class="text-muted">{% if msg.failedAt %} · {{ msg.failedAt|date('d/m/Y H:i') }}{% endif %}</span></dt>
+                            <dd>{{ msg.error ?: '—' }}</dd>
+                        </div>
+                    {% endfor %}
+                </dl>
+                <p class="text-sm text-muted" style="margin-top: .75rem;">
+                    Rejouer : <code>php bin/console messenger:failed:retry --force</code> · inspecter : <code>php bin/console messenger:failed:show</code>
+                </p>
+            </div>
+        </details>
+    {% endif %}
 {% endblock %}

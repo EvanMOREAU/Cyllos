@@ -280,6 +280,25 @@ class WebhookControllerTest extends WebTestCase
         self::assertNull($paymentRepository->findOneByClientAndHelloAssoId($client, 111222));
     }
 
+    public function testLegacyTokenlessUrlStampsTheClientForTheDashboard(): void
+    {
+        $client = $this->createTestClient();
+        self::assertNull($client->getLegacyWebhookLastSeenAt());
+
+        $this->httpClient->request(
+            'POST',
+            '/webhook/helloasso/' . $client->getSlug(),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()),
+        );
+
+        self::assertResponseStatusCodeSame(404);
+
+        $this->entityManager->clear();
+        $reloaded = $this->entityManager->getRepository(Client::class)->find($client->getId());
+        self::assertNotNull($reloaded->getLegacyWebhookLastSeenAt());
+    }
+
     public function testWebhookDoesNotDuplicateAnAlreadyKnownPayment(): void
     {
         $client = $this->createTestClient();

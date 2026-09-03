@@ -98,6 +98,24 @@ class ClientRepository extends ServiceEntityRepository
     }
 
     /**
+     * Active clients whose HelloAsso notification URL still hits the token-less
+     * legacy endpoint (see WebhookController::legacy()), seen since $since.
+     * Most-recent signal first.
+     *
+     * @return Client[]
+     */
+    public function findWithRecentLegacyWebhook(\DateTimeImmutable $since): array
+    {
+        return $this->createQueryBuilder('c')
+            ->andWhere('c.active = true')
+            ->andWhere('c.legacyWebhookLastSeenAt >= :since')
+            ->setParameter('since', $since)
+            ->orderBy('c.legacyWebhookLastSeenAt', 'DESC')
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * @return Client[]
      */
     public function search(string $query, int $limit = 8): array

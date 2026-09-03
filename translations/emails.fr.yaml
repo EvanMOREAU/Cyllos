@@ -1,27 +1,32 @@
-# Transactional e-mails sent by NotificationMailer::sendTranslated().
-# Placeholders: %id% (HelloAsso payment id), %amount% (already formatted "12.34"),
-# %errors% (newline-joined error list).
+# Default transactional e-mails. Resolved by App\Notification\EmailComposer,
+# which applies the "[Cyllos]" subject prefix itself (overridable per client),
+# so the subjects below carry no prefix.
+#
+# A client can override any subject/body from the admin "Personnalisation" tab
+# (App\Entity\ClientCustomization). Placeholders — substituted verbatim, not by
+# the translator — are listed in ClientCustomization::PLACEHOLDERS:
+#   %id% %amount% %payer% %payer_email% %form% %date% %client% %mode% %errors%
 
 over_limit:
-    subject: '[Cyllos] Paiement dépassant la limite'
+    subject: 'Paiement dépassant la limite'
     body: "Un paiement a dépassé la limite autorisée, approbation manuelle requise.\nId : %id%\nMontant : %amount% €"
 
 too_late:
-    subject: '[Cyllos] Paiement en retard'
+    subject: 'Paiement en retard'
     body: "Un paiement a été reçu en retard.\nId : %id%"
 
 waiting:
-    subject: '[Cyllos] Paiement en attente'
+    subject: 'Paiement en attente'
     body: "Un paiement a été reçu avec l'état « Attente ».\nId : %id%"
 
 success:
-    subject: '[Cyllos] Paiement réussi'
+    subject: 'Paiement réussi'
     body: "Un paiement a été effectué avec succès.\nId : %id%\nMontant : %amount% €"
 
 failure:
-    subject: '[Cyllos] Paiement en échec'
+    subject: 'Paiement en échec'
     body: "Un paiement n'a pas pu être effectué.\nId : %id%\nMontant : %amount% €"
 
 manual_error:
-    subject: '[Cyllos] Erreur lors du traitement'
+    subject: 'Erreur lors du traitement'
     body: "Liste des erreurs pour le paiement %id% :\n%errors%"

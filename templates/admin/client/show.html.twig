@@ -136,6 +136,28 @@
                 </dl>
             </div>
         </div>
+
+    </div>
+
+    {% set customization = client.customization %}
+    {% set customEmailCount = customization ? customization.emailTemplates|length : 0 %}
+    <div class="card card--section">
+        <div class="card__header">
+            <div>
+                <h2>Personnalisation</h2>
+                <p>Textes des e-mails automatiques et libellés propres à ce client. Vide = valeur par défaut de l’application.</p>
+            </div>
+            <a class="btn btn--secondary btn--sm" href="{{ path('admin_client_edit_customization', {id: client.id}) }}">{{ icons.render('settings') }} Modifier</a>
+        </div>
+        <div class="card__body">
+            <dl class="kv-list" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem 1.5rem;">
+                <div class="kv-row"><dt>Modèles d’e-mail modifiés</dt><dd>{{ customEmailCount > 0 ? customEmailCount ~ ' / 6' : 'aucun (défauts)' }}</dd></div>
+                <div class="kv-row"><dt>Préfixe des sujets</dt><dd>{{ customization and customization.emailSubjectPrefix is not null ? '« ' ~ customization.emailSubjectPrefix ~ ' »' : '[Cyllos]' }}</dd></div>
+                <div class="kv-row"><dt>Pied de page</dt><dd>{{ customization and customization.emailFooter ? 'défini' : '—' }}</dd></div>
+                <div class="kv-row"><dt>Description Cyclos</dt><dd>{{ customization and customization.cyclosDescriptionPrefix ? '« ' ~ customization.cyclosDescriptionPrefix ~ ' »' : 'Paiement automatique, id technique ' }}</dd></div>
+                <div class="kv-row"><dt>Libellé mode aperçu</dt><dd>{{ customization and customization.previewModeLabel ? customization.previewModeLabel : 'aperçu (non crédité)' }}</dd></div>
+            </dl>
+        </div>
     </div>
 
     <div class="card card--section" id="webhook-card">

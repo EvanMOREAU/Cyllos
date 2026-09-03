@@ -1,0 +1,53 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Personnalisation — {{ client.name }} - Cyllos{% endblock %}
+{% block content_width %}content--full{% endblock %}
+
+{% block breadcrumb %}<div class="topbar__crumb"><a href="{{ path('admin_client_list') }}">Clients</a> / <a href="{{ path('admin_client_show', {id: client.id}) }}">{{ client.name }}</a> / Personnalisation</div>{% endblock %}
+{% block page_title %}Personnalisation{% endblock %}
+
+{% block body %}
+    <div class="card">
+        {{ form_start(form) }}
+            {{ form_errors(form) }}
+
+            <div class="field-group">
+                <h3 class="text-sm">Éléments transverses</h3>
+                <p class="text-muted text-sm">Laissés vides, ces champs conservent le comportement par défaut de l’application (affiché en filigrane).</p>
+                <div class="form-grid">
+                    {{ form_row(form.emailSubjectPrefix) }}
+                    {{ form_row(form.previewModeLabel) }}
+                    {{ form_row(form.cyclosDescriptionPrefix) }}
+                    {{ form_row(form.emailFooter) }}
+                </div>
+            </div>
+
+            <div class="field-group">
+                <h3 class="text-sm">Modèles d’e-mail</h3>
+                <p class="text-muted text-sm">
+                    Un sujet ou un corps vide utilise le texte par défaut. Variables reconnues (remplacées telles quelles, sans code exécuté) :
+                </p>
+                <ul class="text-sm text-muted">
+                    {% for token, description in placeholders %}
+                        <li><code>{{ token }}</code> — {{ description }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            {% for type, label in emailTypeLabels %}
+                <div class="field-group">
+                    <h3 class="text-sm">{{ label }}</h3>
+                    <div class="form-grid">
+                        {{ form_row(attribute(form, type ~ '__subject')) }}
+                        {{ form_row(attribute(form, type ~ '__body')) }}
+                    </div>
+                </div>
+            {% endfor %}
+
+            <div class="form-footer">
+                <a class="btn btn--ghost" href="{{ path('admin_client_show', {id: client.id}) }}">Annuler</a>
+                <button class="btn" type="submit">Enregistrer</button>
+            </div>
+        {{ form_end(form) }}{# renders the remaining hidden fields, incl. the CSRF token #}
+    </div>
+{% endblock %}
