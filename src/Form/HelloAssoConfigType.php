@@ -112,7 +112,7 @@ class HelloAssoConfigType extends AbstractType
                     'Don (Donation)' => 'Donation',
                     'Boutique (Shop)' => 'Shop',
                 ],
-                'help' => "Doit correspondre exactement au type de la campagne dans HelloAsso, sinon la synchro ne trouvera aucun paiement.",
+                'help' => 'Doit correspondre exactement au type de la campagne dans HelloAsso, sinon la synchro ne trouvera aucun paiement.',
             ])
             ->add('formSlug', TextType::class, [
                 'label' => 'Slug du formulaire',

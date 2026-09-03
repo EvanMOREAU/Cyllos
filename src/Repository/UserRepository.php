@@ -23,7 +23,7 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
     public function upgradePassword(PasswordAuthenticatedUserInterface $user, string $newHashedPassword): void
     {
         if (!$user instanceof User) {
-            throw new UnsupportedUserException(sprintf('Instances of "%s" are not supported.', $user::class));
+            throw new UnsupportedUserException(\sprintf('Instances of "%s" are not supported.', $user::class));
         }
 
         $user->setPassword($newHashedPassword);
@@ -99,9 +99,9 @@ class UserRepository extends ServiceEntityRepository implements PasswordUpgrader
         $qb = $this->createQueryBuilder('u')->orderBy('u.email', 'ASC');
         foreach ($criteria as $field => $value) {
             if ($value === null) {
-                $qb->andWhere(sprintf('u.%s IS NULL', $field));
+                $qb->andWhere(\sprintf('u.%s IS NULL', $field));
             } else {
-                $qb->andWhere(sprintf('u.%s = :%s', $field, $field))->setParameter($field, $value);
+                $qb->andWhere(\sprintf('u.%s = :%s', $field, $field))->setParameter($field, $value);
             }
         }
 

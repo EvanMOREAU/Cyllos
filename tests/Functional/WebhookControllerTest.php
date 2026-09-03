@@ -94,6 +94,11 @@ class WebhookControllerTest extends WebTestCase
         return $config;
     }
 
+    private function webhookPath(Client $client): string
+    {
+        return '/webhook/helloasso/' . $client->getSlug() . '/' . $client->getWebhookToken();
+    }
+
     private function paymentPayload(array $overrides = []): array
     {
         return array_replace_recursive([
@@ -115,7 +120,7 @@ class WebhookControllerTest extends WebTestCase
 
         $this->httpClient->request(
             'POST',
-            '/webhook/helloasso/' . $client->getSlug(),
+            $this->webhookPath($client),
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode($this->paymentPayload()),
         );
@@ -131,13 +136,48 @@ class WebhookControllerTest extends WebTestCase
         self::assertSame(20.0, $payment->getAmount());
     }
 
+    /**
+     * In automatic mode the webhook must not attempt the Cyclos credit inline: it
+     * persists the payment as "todo" and hands the rest to a worker via
+     * ProcessPaymentMessage, so HelloAsso gets a fast response.
+     */
+    public function testWebhookDefersCreditingToAMessageInAutomaticMode(): void
+    {
+        $client = $this->createTestClient(automatic: true);
+
+        $this->httpClient->request(
+            'POST',
+            $this->webhookPath($client),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()),
+        );
+
+        self::assertResponseIsSuccessful();
+
+        /** @var PaymentRepository $paymentRepository */
+        $paymentRepository = self::getContainer()->get(PaymentRepository::class);
+        $payment = $paymentRepository->findOneByClientAndHelloAssoId($client, 111222);
+
+        self::assertNotNull($payment);
+        self::assertSame(PaymentStatus::Todo, $payment->getStatus());
+
+        /** @var \Symfony\Component\Messenger\Transport\InMemory\InMemoryTransport $transport */
+        $transport = self::getContainer()->get('messenger.transport.async');
+        $processMessages = array_filter(
+            $transport->getSent(),
+            static fn (\Symfony\Component\Messenger\Envelope $e) => $e->getMessage() instanceof \App\Message\ProcessPaymentMessage,
+        );
+        self::assertCount(1, $processMessages);
+        self::assertSame($payment->getId(), reset($processMessages)->getMessage()->paymentId);
+    }
+
     public function testWebhookIgnoresOrderEventType(): void
     {
         $client = $this->createTestClient();
 
         $this->httpClient->request(
             'POST',
-            '/webhook/helloasso/' . $client->getSlug(),
+            $this->webhookPath($client),
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode($this->paymentPayload(['eventType' => 'Order'])),
         );
@@ -155,7 +195,7 @@ class WebhookControllerTest extends WebTestCase
 
         $this->httpClient->request(
             'POST',
-            '/webhook/helloasso/' . $client->getSlug(),
+            $this->webhookPath($client),
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode($this->paymentPayload(['data' => ['amount' => ['total' => 100000]]])),
         );
@@ -174,12 +214,89 @@ class WebhookControllerTest extends WebTestCase
     {
         $this->httpClient->request(
             'POST',
-            '/webhook/helloasso/does-not-exist',
+            '/webhook/helloasso/does-not-exist/' . str_repeat('a', 64),
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode($this->paymentPayload()),
         );
 
         self::assertResponseStatusCodeSame(404);
+    }
+
+    public function testWebhookReturnsNotFoundForWrongTokenWithoutCreatingAPayment(): void
+    {
+        $client = $this->createTestClient();
+
+        $this->httpClient->request(
+            'POST',
+            '/webhook/helloasso/' . $client->getSlug() . '/' . str_repeat('b', 64),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()),
+        );
+
+        self::assertResponseStatusCodeSame(404);
+
+        /** @var PaymentRepository $paymentRepository */
+        $paymentRepository = self::getContainer()->get(PaymentRepository::class);
+        self::assertNull($paymentRepository->findOneByClientAndHelloAssoId($client, 111222));
+    }
+
+    /**
+     * The webhook route is throttled per client slug via the "webhook" rate
+     * limiter (config/packages/rate_limiter.yaml). The test env bucket is small
+     * (5, see config/packages/test/rate_limiter.yaml); exercised directly on the
+     * factory the controller is wired to, since the functional HTTP client resets
+     * the in-memory limiter store between requests.
+     */
+    public function testWebhookRateLimiterRejectsOnceTheClientBucketIsEmpty(): void
+    {
+        /** @var \Symfony\Component\RateLimiter\RateLimiterFactoryInterface $factory */
+        $factory = self::getContainer()->get('limiter.webhook');
+        $limiter = $factory->create('some-client-slug');
+
+        for ($i = 0; $i < 5; $i++) {
+            self::assertTrue($limiter->consume()->isAccepted(), "consume #$i should be accepted");
+        }
+
+        self::assertFalse($limiter->consume()->isAccepted());
+        // A different slug has its own independent bucket.
+        self::assertTrue($factory->create('another-client-slug')->consume()->isAccepted());
+    }
+
+    public function testLegacyTokenlessUrlIsRejectedWithoutCreatingAPayment(): void
+    {
+        $client = $this->createTestClient();
+
+        $this->httpClient->request(
+            'POST',
+            '/webhook/helloasso/' . $client->getSlug(),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()),
+        );
+
+        self::assertResponseStatusCodeSame(404);
+
+        /** @var PaymentRepository $paymentRepository */
+        $paymentRepository = self::getContainer()->get(PaymentRepository::class);
+        self::assertNull($paymentRepository->findOneByClientAndHelloAssoId($client, 111222));
+    }
+
+    public function testLegacyTokenlessUrlStampsTheClientForTheDashboard(): void
+    {
+        $client = $this->createTestClient();
+        self::assertNull($client->getLegacyWebhookLastSeenAt());
+
+        $this->httpClient->request(
+            'POST',
+            '/webhook/helloasso/' . $client->getSlug(),
+            server: ['CONTENT_TYPE' => 'application/json'],
+            content: json_encode($this->paymentPayload()),
+        );
+
+        self::assertResponseStatusCodeSame(404);
+
+        $this->entityManager->clear();
+        $reloaded = $this->entityManager->getRepository(Client::class)->find($client->getId());
+        self::assertNotNull($reloaded->getLegacyWebhookLastSeenAt());
     }
 
     public function testWebhookDoesNotDuplicateAnAlreadyKnownPayment(): void
@@ -188,8 +305,8 @@ class WebhookControllerTest extends WebTestCase
 
         $payload = json_encode($this->paymentPayload());
 
-        $this->httpClient->request('POST', '/webhook/helloasso/' . $client->getSlug(), server: ['CONTENT_TYPE' => 'application/json'], content: $payload);
-        $this->httpClient->request('POST', '/webhook/helloasso/' . $client->getSlug(), server: ['CONTENT_TYPE' => 'application/json'], content: $payload);
+        $this->httpClient->request('POST', $this->webhookPath($client), server: ['CONTENT_TYPE' => 'application/json'], content: $payload);
+        $this->httpClient->request('POST', $this->webhookPath($client), server: ['CONTENT_TYPE' => 'application/json'], content: $payload);
 
         self::assertResponseIsSuccessful();
 
@@ -212,7 +329,7 @@ class WebhookControllerTest extends WebTestCase
 
         $this->httpClient->request(
             'POST',
-            '/webhook/helloasso/' . $client->getSlug(),
+            $this->webhookPath($client),
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode($this->paymentPayload()), // formSlug: test-form, amount: 20€
         );
@@ -236,7 +353,7 @@ class WebhookControllerTest extends WebTestCase
 
         $this->httpClient->request(
             'POST',
-            '/webhook/helloasso/' . $client->getSlug(),
+            $this->webhookPath($client),
             server: ['CONTENT_TYPE' => 'application/json'],
             content: json_encode($this->paymentPayload()),
         );

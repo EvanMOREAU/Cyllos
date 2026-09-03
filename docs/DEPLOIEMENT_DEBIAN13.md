@@ -253,6 +253,15 @@ Copie la valeur affichée (`APP_ENCRYPTION_KEY=...`) dans `.env.local`.
 chiffré** — sans elle, tous les secrets clients stockés en base deviennent
 illisibles.
 
+**Rotation de la clé** (sans interruption) : générer une nouvelle clé, déplacer
+la valeur actuelle de `APP_ENCRYPTION_KEY` dans `APP_ENCRYPTION_KEYS_LEGACY`
+(plusieurs clés séparées par des virgules acceptées, déchiffrement seul), mettre
+la nouvelle dans `APP_ENCRYPTION_KEY`, recharger (`cache:clear` + redémarrage
+PHP-FPM/workers), puis `sudo -u cyllos php bin/console app:secrets:reencrypt`
+(couvre identifiants HelloAsso, mots de passe Cyclos **et** secrets TOTP)
+(`--dry-run` pour un aperçu). Une fois la commande sans reste, vider
+`APP_ENCRYPTION_KEYS_LEGACY`.
+
 ---
 
 ## 9. Base de données de l'application
@@ -381,17 +390,27 @@ systemd installé avec le paquet).
 
 ---
 
-## 13. Worker du Scheduler (rattrapage HelloAsso + purge)
+## 13. Workers systemd
 
-Sans ce processus actif en continu, aucune tâche planifiée ne se
-déclenche — ni le rattrapage HelloAsso (webhooks manqués), ni la purge des
-vieux paiements.
+Deux processus doivent tourner en continu :
+
+- **`cyllos-scheduler`** — déclenche les tâches planifiées (rattrapage HelloAsso
+  des webhooks manqués, purge des paiements crédités, purge quotidienne du
+  journal d'activité). Sans lui, aucune tâche planifiée ne s'exécute.
+- **`cyllos-worker`** — consomme la file `async` : le crédit Cyclos des paiements
+  reçus par webhook y est traité (hors de la requête HTTP, que HelloAsso
+  interrompt sinon), l'envoi des e-mails de notification, et le rattrapage
+  HelloAsso par client (`FetchClientPaymentsMessage`, un message par client actif
+  émis par le Scheduler). Sans lui, les paiements reçus par webhook restent au
+  statut `todo` sans être crédités et le rattrapage planifié ne s'exécute pas.
+  Solution de repli sans worker : `php bin/console app:helloasso:fetch --sync`
+  en tâche cron, qui fait le rattrapage en ligne (mais pas le crédit temps réel).
+
+### `cyllos-scheduler`
 
 ```bash
 sudo nano /etc/systemd/system/cyllos-scheduler.service
 ```
-
-Contenu :
 
 ```ini
 [Unit]
@@ -410,13 +429,44 @@ RestartSec=5
 WantedBy=multi-user.target
 ```
 
+### `cyllos-worker`
+
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now cyllos-scheduler
-sudo systemctl status cyllos-scheduler
+sudo nano /etc/systemd/system/cyllos-worker.service
 ```
 
-Le `status` doit afficher `active (running)`.
+```ini
+[Unit]
+Description=Cyllos - worker file async (crédit Cyclos des paiements webhook + e-mails)
+After=network.target mariadb.service
+
+[Service]
+Type=simple
+User=cyllos
+WorkingDirectory=/var/www/cyllos
+ExecStart=/usr/bin/php bin/console messenger:consume async --env=prod --time-limit=3600 --limit=100
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+`--time-limit`/`--limit` font se terminer proprement le worker à intervalle
+régulier ; `Restart=always` le relance aussitôt (évite les fuites mémoire d'un
+process PHP très long). Après tout déploiement qui change le code des messages ou
+des handlers : `sudo systemctl restart cyllos-worker` pour que le nouveau code
+soit pris en compte.
+
+### Activation
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable --now cyllos-scheduler cyllos-worker
+sudo systemctl status cyllos-scheduler cyllos-worker
+```
+
+Le `status` doit afficher `active (running)` pour les deux.
 
 ---
 
@@ -434,15 +484,23 @@ sudo systemctl is-active mariadb
 # Nginx actif
 sudo systemctl is-active nginx
 
-# Worker Scheduler actif
+# Workers actifs
 sudo systemctl is-active cyllos-scheduler
+sudo systemctl is-active cyllos-worker
 
 # Page de connexion accessible
 curl -sI -H "Host: cyllos.exemple.fr" http://127.0.0.1/login | head -1
 
+# Supervision : doit répondre 200 et {"status":"ok",...}
+curl -s -H "Host: cyllos.exemple.fr" http://127.0.0.1/health
+
 # Migrations bien appliquées (la ligne "New" doit valoir 0)
 sudo -u cyllos php bin/console doctrine:migrations:status --env=prod | grep "New"
 ```
+
+`GET /health` est le point d'entrée pour une sonde de supervision externe :
+`200` tant que la base répond (corps `status` = `ok` ou `degraded`, avec le
+détail file `async` / paiements bloqués), `503` si la base est injoignable.
 
 Chaque `is-active` doit répondre `active`. Une fois tout vert, connecte-toi
 sur `https://cyllos.exemple.fr/login` avec le compte admin créé à l'étape 9
@@ -456,7 +514,11 @@ Une fois l'application installée, deux options pour la mettre à jour :
 
 - **Depuis l'interface** : `/dev/version` (compte `ROLE_DEVELOPER` ou
   `ROLE_CEO`) propose un bouton "Déployer la mise à jour" quand une nouvelle
-  version est disponible sur le dépôt canonique.
+  version est disponible sur le dépôt canonique. Le déploiement est protégé par
+  un verrou (`var/deploy.lock`) : un second clic pendant qu'un déploiement tourne
+  échoue proprement au lieu d'empiler les commandes. Sans la règle sudo
+  ci-dessous, l'étape de redémarrage des workers est ignorée (marquée
+  « facultatif », avec la commande à lancer à la main).
 - **Manuellement** :
 
 ```bash
@@ -466,8 +528,31 @@ sudo -u cyllos composer install --no-dev --optimize-autoloader --no-interaction
 sudo -u cyllos php bin/console doctrine:migrations:migrate --no-interaction --env=prod
 sudo -u cyllos php bin/console cache:clear --env=prod
 sudo -u cyllos php bin/console asset-map:compile --env=prod
-sudo systemctl restart php8.4-fpm cyllos-scheduler
+sudo systemctl restart php8.4-fpm cyllos-scheduler cyllos-worker
 ```
+
+Le redémarrage de `cyllos-worker` est indispensable : un worker déjà lancé garde
+en mémoire l'ancien code des handlers de messages.
+
+### Autoriser le bouton "Déployer" à redémarrer les workers (facultatif)
+
+Par défaut, le bouton `/dev/version` n'a pas les droits systemd : il tente
+`sudo -n systemctl restart cyllos-worker cyllos-scheduler`, et si aucune règle
+`sudoers` sans mot de passe n'existe, l'étape est marquée « facultatif » et
+affiche la commande à lancer soi-même. Pour rendre ce redémarrage automatique,
+autoriser **précisément** ces deux unités pour l'utilisateur du serveur web :
+
+```bash
+sudo tee /etc/sudoers.d/cyllos-deploy >/dev/null <<'EOF'
+cyllos ALL=(root) NOPASSWD: /usr/bin/systemctl restart cyllos-worker cyllos-scheduler
+EOF
+sudo chmod 440 /etc/sudoers.d/cyllos-deploy
+sudo visudo -c
+```
+
+Adapter `cyllos` au compte qui exécute PHP-FPM. Ne pas élargir la règle à
+`systemctl` en général : elle donnerait un contrôle root quasi total à une
+session web compromise.
 
 **Ne saute pas l'étape `asset-map:compile`**, même si elle paraît redondante avec
 `cache:clear` : sans elle, un déploiement qui ajoute un **nouveau** fichier
@@ -477,6 +562,26 @@ fonctionnalité correspondante reste cassée silencieusement (pas d'erreur
 visible, juste un élément d'interface qui ne s'initialise jamais) jusqu'à ce
 que cette commande soit lancée manuellement. Voir "Incidents résolus" dans la
 documentation (`/dev/documentation`).
+
+### Évolution recommandée : pipeline CI/CD
+
+Le bouton "Déployer" est pratique pour un petit outil interne mais reste une
+surface d'élévation de privilèges (une session `ROLE_CEO` compromise = du code
+arbitraire exécuté sur le serveur). À terme, le remplacer par un pipeline
+externe :
+
+- build + `composer install --no-dev` + `phpunit` dans la CI (GitHub Actions) ;
+- déploiement par `git pull --ff-only` (ou rsync d'un artefact) via SSH avec une
+  clé de déploiement dédiée, déclenché au merge sur `main` ;
+- `doctrine:migrations:migrate`, `cache:clear`, `asset-map:compile`, puis
+  `systemctl restart php8.4-fpm cyllos-worker cyllos-scheduler` dans le script de
+  déploiement ;
+- un outil type Deployer/Ansible si des releases atomiques (symlink `current`)
+  et un rollback rapide deviennent nécessaires.
+
+Une fois ce pipeline en place, retirer `DeploymentRunner` et la route
+`/dev/version/deployer` (garder la page de comparaison de version en lecture
+seule).
 
 ---
 
@@ -488,5 +593,8 @@ documentation (`/dev/documentation`).
 | Page blanche / 500 sans détail | `APP_ENV=prod` masque les erreurs par design | `tail -f var/log/prod.log` |
 | "APP_ENCRYPTION_KEY must be..." | Clé absente ou mal copiée dans `.env.local` | Regénérer avec `app:generate-encryption-key` |
 | Rattrapage HelloAsso ne se déclenche jamais | Worker Scheduler arrêté | `sudo systemctl status cyllos-scheduler` |
+| Paiements reçus par webhook restent en `todo`, jamais crédités | Worker `async` arrêté, ou file pleine de messages en échec | `sudo systemctl status cyllos-worker` ; `php bin/console messenger:failed:show --env=prod` |
+| Un changement de code des messages ne prend pas effet | `cyllos-worker` tourne encore avec l'ancien code | `sudo systemctl restart cyllos-worker` |
+| Webhooks légitimes rejetés en `429` | Débit dépassé, ou horloge/serveur unique : le compteur `rate_limiter.webhook` est stocké dans le cache filesystem (`var/cache`), suffisant pour un serveur unique ; sur plusieurs frontaux il faudrait un backend partagé (Redis) | ajuster `limit`/`rate` dans `config/packages/rate_limiter.yaml` |
 | Permission denied sur les fichiers uploadés | Mauvais propriétaire sur `var/`/`public/uploads` | `sudo chown -R cyllos:cyllos /var/www/cyllos/var /var/www/cyllos/public/uploads` |
 | Un élément d'interface récemment ajouté ne s'affiche pas (vide, sans style, JS inactif), sans erreur visible | `asset-map:compile` pas relancé après un déploiement qui ajoute un nouveau fichier JS/CSS | `sudo -u cyllos php bin/console asset-map:compile --env=prod` |

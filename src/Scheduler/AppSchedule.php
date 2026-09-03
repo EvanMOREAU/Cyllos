@@ -26,9 +26,15 @@ class AppSchedule implements ScheduleProviderInterface
     {
         return (new Schedule())
             ->with(
-                RecurringMessage::cron('*/10 * * * *', new RunCommandMessage('app:helloasso:fetch')),# fetch toutes les minutes à la place de toutes les 15m : '*/15 * * * *'
-                RecurringMessage::cron('0 */6 * * *', new RunCommandMessage('app:payments:purge')), # Supprimer les paiements crédités toutes les 6h
+                RecurringMessage::cron('*/10 * * * *', new RunCommandMessage('app:helloasso:fetch')),
+                RecurringMessage::cron('0 */6 * * *', new RunCommandMessage('app:payments:purge')),
+                RecurringMessage::cron('30 3 * * *', new RunCommandMessage('app:activity-log:purge')),
             )
-            ->stateful($this->scheduleCache);
+            ->stateful($this->scheduleCache)
+            // After a worker outage, run each missed job once to catch up rather
+            // than firing it once per tick that was skipped (the fetch is a
+            // safety net and the purges are idempotent — a backlog burst is
+            // pointless).
+            ->processOnlyLastMissedRun(true);
     }
 }

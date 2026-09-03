@@ -50,7 +50,7 @@ class PasswordResetController extends AbstractController
                 $this->sendResetLink($user);
             }
 
-            $this->addFlash('success', "Si un compte client existe avec cette adresse, un e-mail de réinitialisation a été envoyé.");
+            $this->addFlash('success', 'Si un compte client existe avec cette adresse, un e-mail de réinitialisation a été envoyé.');
 
             return $this->redirectToRoute('app_login');
         }
@@ -104,7 +104,7 @@ class PasswordResetController extends AbstractController
         $this->mailer->send(
             $user->getEmail(),
             '[Cyllos] Réinitialisation de votre mot de passe',
-            sprintf(
+            \sprintf(
                 "Une réinitialisation de mot de passe a été demandée pour ce compte.\n\n".
                 "Cliquez sur le lien suivant pour choisir un nouveau mot de passe (valable %d minutes) :\n%s\n\n".
                 "Si vous n'êtes pas à l'origine de cette demande, ignorez simplement cet e-mail.",

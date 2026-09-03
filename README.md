@@ -47,20 +47,29 @@ base avec `APP_ENCRYPTION_KEY` via `SecretEncryptor` — jamais stockés en clai
 ### Cycle de vie d'un paiement
 
 1. **Réception** : HelloAsso notifie Cyllos par webhook — une seule URL par
-   client (`POST /webhook/helloasso/{slug}`), quel que soit son nombre de
+   client (`POST /webhook/helloasso/{slug}/{token}`), quel que soit son nombre de
    formulaires ; c'est le `formSlug` inclus dans la notification qui indique
-   lequel des formulaires actifs du client est concerné. `PaymentProcessor`
+   lequel des formulaires actifs du client est concerné. HelloAsso ne signant
+   pas ses notifications, le `token` (secret propre au client, 64 caractères
+   hexadécimaux, visible et régénérable sur la fiche client) est ce qui
+   authentifie l'appel : un `token` absent ou incorrect renvoie `404` sans rien
+   créer. `PaymentProcessor`
    valide la notification (formulaire actif reconnu, montant sous la limite
    *de ce formulaire*, état `Authorized`/`Waiting`, pas de doublon) et crée un
    `Payment`.
-2. **Décision** :
-   - si le crédit automatique est désactivé pour ce client → le paiement reste
-     `Todo`, à créditer manuellement depuis `/admin` ou l'espace client ;
+2. **Décision** : le webhook enregistre le `Payment` en `Todo` et répond
+   aussitôt à HelloAsso ; la suite se fait dans un worker (message
+   `ProcessPaymentMessage` sur la file `async`), pour ne pas dépasser le délai
+   d'attente du webhook. Dans le worker :
+   - si le crédit automatique est désactivé pour ce client → aucun message n'est
+     même émis, le paiement reste `Todo`, à créditer manuellement depuis
+     `/admin` ou l'espace client ;
    - si le paiement est trop en retard (> 12h, `NUMBER_LATE_HOURS_ACCEPTED`) ou
      encore `Waiting` côté HelloAsso → il est marqué en conséquence et un mail
      d'alerte est envoyé, sans crédit automatique ;
-   - sinon, `PaymentProcessor` tente immédiatement de créditer le compte
-     Cyclos correspondant.
+   - sinon, `PaymentProcessor` tente de créditer le compte Cyclos correspondant.
+   Le traitement est idempotent : un message rejoué retrouve le paiement dans un
+   statut autre que `Todo` et ne fait rien (ni double crédit, ni double mail).
 3. **Crédit Cyclos** (`CyclosClient`) : si une règle `EmailAlias` existe pour
    ce client et cet email payeur (voir plus bas), l'email de remplacement est
    utilisé directement ; sinon recherche de l'utilisateur par l'email payeur
@@ -75,13 +84,28 @@ base avec `APP_ENCRYPTION_KEY` via `SecretEncryptor` — jamais stockés en clai
    interroge l'historique HelloAsso de chaque client actif pour récupérer tout
    paiement manqué (notification perdue, HelloAsso indisponible, etc.). Deux
    usages de ce même mécanisme, avec un comportement différent :
-   - **planifié** (Scheduler, toutes les minutes) : sans déclencher de crédit
-     automatique — les paiements récupérés restent `Todo`, c'est un filet de
-     sécurité, pas une deuxième voie de crédit ;
-   - **synchro manuelle** (bouton "Synchro HelloAsso" côté admin) : chaque
-     paiement récupéré est ensuite passé dans la même décision de crédit
-     automatique que le webhook (mêmes règles : `paymentAutomaticEnabled`,
-     `maxAmount`, délai de 12h).
+   - **planifié** (Scheduler) : `app:helloasso:fetch` ne fait pas le travail
+     lui-même, il pousse un message `FetchClientPaymentsMessage` par client actif
+     sur la file `async` (avec un délai aléatoire de 0–30 s pour étaler la charge),
+     et le worker traite chaque client indépendamment — un client lent ou en
+     erreur ne bloque plus les autres. Sans déclencher de crédit automatique :
+     les paiements récupérés restent `Todo`, c'est un filet de sécurité, pas une
+     deuxième voie de crédit. (`--sync` force le traitement en ligne, `--client
+     <slug>` ne traite qu'un client.)
+   - **synchro manuelle** (bouton "Synchro HelloAsso" côté admin) : émet un
+     `FetchClientPaymentsMessage` (avec `attemptAutomaticCredit: true`) traité
+     par le worker, hors de la requête HTTP. Chaque paiement récupéré passe
+     alors dans la même décision de crédit automatique que le webhook (mêmes
+     règles : `paymentAutomaticEnabled`, `maxAmount`, délai de 12h). Les
+     résultats apparaissent dans la liste des paiements dès que le worker a
+     terminé.
+
+Les appels sortants HelloAsso et Cyclos passent par des clients HTTP qui
+réessaient automatiquement les échecs transitoires (429/5xx, erreurs réseau) avec
+un backoff exponentiel — sauf le POST de paiement Cyclos, jamais rejoué pour ne
+pas risquer un double crédit (`App\Http\NonMutatingRetryStrategy`). La route du
+webhook est par ailleurs limitée en débit par client (`rate_limiter.webhook`,
+30 requêtes/minute par slug).
 
 Chaque paiement (`Payment`) garde un statut (`todo`, `too_high`, `too_late`,
 `preview_ok`, `success`, `success_auto`, `fail`, `waiting`) et un message
@@ -89,8 +113,14 @@ d'erreur le cas échéant, visible dans les listes de paiements.
 
 ### Espaces applicatifs
 
-- **`/admin`** (`ROLE_ADMIN`) : vue transverse sur tous les clients — gestion
-  des clients (assistant de création en 4 étapes, config Cyclos/réglages,
+- **`/admin`** (`ROLE_ADMIN`) : vue transverse sur tous les clients. La page
+  d'accueil est un **tableau de bord** (`/admin/tableau-de-bord`) : paiements des
+  30 derniers jours par statut (compteurs cliquables + barre de répartition),
+  taux d'échec, état de la file `async` (en attente / en échec / âge du plus
+  ancien), paiements bloqués en `todo` chez un client en crédit automatique,
+  clients actifs sans paiement reçu depuis 48 h (webhook probablement mal
+  configuré) et les derniers échecs. Gestion des clients (assistant de création
+  en 4 étapes, config Cyclos/réglages,
   formulaire(s) HelloAsso ajoutables/désactivables/supprimables), tous les
   paiements avec filtre par client (colonne "Formulaire" indiquant lequel a
   reçu le paiement, colonne "E-mail HelloAsso" avec indicateur si une règle
@@ -169,11 +199,15 @@ comparaison reste possible.
 Quand l'application n'est pas à jour, un bouton "Déployer la mise à jour"
 apparaît sur cette page pour `ROLE_DEVELOPER`/`ROLE_CEO`. Il exécute dans l'ordre
 `git pull --ff-only`, `composer install`, les migrations Doctrine en attente,
-puis `cache:clear`, et affiche le résultat détaillé de chaque étape (sortie et
-code de retour). C'est une action réelle sur le checkout de production — voir
-[Déploiement en production](#déploiement-en-production) pour les prérequis
-(notamment que l'utilisateur système du serveur web doit pouvoir exécuter
-`git`/`composer` et écrire dans le dossier de l'application).
+`cache:clear`, `asset-map:compile`, puis (facultatif) `sudo -n systemctl restart
+cyllos-worker cyllos-scheduler`, et affiche le résultat détaillé de chaque étape.
+Un déploiement déjà en cours (verrou `var/deploy.lock`) fait échouer le second
+clic avec un message explicite plutôt que d'empiler les commandes. Le
+redémarrage des workers n'a lieu que si une règle sudo sans mot de passe existe
+(voir `docs/DEPLOIEMENT_DEBIAN13.md`) ; sinon l'étape indique la commande à
+lancer à la main, sans faire échouer le déploiement. C'est une action réelle sur
+le checkout de production — voir [Déploiement en production](#déploiement-en-production)
+pour les prérequis.
 
 ### Journal d'activité
 
@@ -181,6 +215,40 @@ code de retour). C'est une action réelle sur le checkout de production — voir
 uniquement, pas un simple `ROLE_ADMIN`), après avoir resaisi le mot de passe
 du compte connecté. Suppression définitive, sans corbeille ni export
 préalable.
+
+En complément, `app:activity-log:purge` (planifié une fois par jour) borne la
+table : les traces d'appels API (`action` en `api.*`, le gros du volume)
+expirent après `ACTIVITY_LOG_API_RETENTION_DAYS` (14 j par défaut), les lignes
+d'audit après `ACTIVITY_LOG_RETENTION_DAYS` (365 j).
+
+### Supervision (`/health`)
+
+`GET /health` (non authentifié, pour une sonde externe) renvoie un JSON sur
+l'état interne de Cyllos : base de données, file de messages `async` (nombre en
+attente, en échec, âge du plus ancien) et paiements bloqués en `todo` chez un
+client en crédit automatique (le symptôme d'un `cyllos-worker` arrêté). Code
+HTTP `200` si `ok`/`degraded` (détail dans le corps), `503` si la base est
+injoignable. Aucun appel à HelloAsso ni Cyclos n'est fait (ce serait les
+solliciter à chaque interrogation).
+
+### Rotation de la clé de chiffrement
+
+Les secrets stockés en base — identifiants HelloAsso, mot de passe Cyclos, et
+secret TOTP de chaque compte 2FA — sont chiffrés avec `SecretEncryptor`
+(AES-256-GCM). Les nouvelles valeurs utilisent toujours `APP_ENCRYPTION_KEY` ; le
+déchiffrement essaie cette clé puis, le cas échéant, chacune des clés listées
+dans `APP_ENCRYPTION_KEYS_LEGACY` (séparées par des virgules). Pour changer de
+clé sans interruption :
+
+1. Générer une nouvelle clé : `php bin/console app:generate-encryption-key`.
+2. Dans `.env.local` : déplacer la valeur actuelle de `APP_ENCRYPTION_KEY` vers
+   `APP_ENCRYPTION_KEYS_LEGACY`, mettre la nouvelle clé dans `APP_ENCRYPTION_KEY`.
+3. Recharger l'application (`cache:clear`, redémarrage PHP-FPM/workers).
+4. Ré-chiffrer les secrets existants : `php bin/console app:secrets:reencrypt`
+   (option `--dry-run` pour un aperçu). La commande couvre les identifiants
+   HelloAsso, les mots de passe Cyclos et les secrets TOTP ; elle signale sans
+   écraser tout secret qu'aucune clé configurée ne déchiffre.
+5. Une fois `app:secrets:reencrypt` sans reste, vider `APP_ENCRYPTION_KEYS_LEGACY`.
 
 ## Prérequis
 
@@ -235,7 +303,13 @@ Depuis `/admin/clients`, créer un client avec :
 - ses réglages (paiements Cyclos actifs, mode automatique, email de notification).
 
 L'URL du webhook à renseigner côté HelloAsso ("Intégrations et API") est
-affichée sur la page du client : `/webhook/helloasso/{slug}`.
+affichée en entier sur la fiche du client, dans la section pleine largeur
+"URL de webhook HelloAsso" (sous les cartes de configuration, au-dessus des
+comptes utilisateurs), avec un bouton **Copier** :
+`/webhook/helloasso/{slug}/{token}`, où `token` est le secret propre au client.
+Le bouton "Régénérer le jeton" (dans l'en-tête de cette section) en produit un
+nouveau — l'URL doit alors être mise à jour dans HelloAsso, l'ancienne cessant
+aussitôt d'être acceptée.
 
 Si ce client utilise plusieurs formulaires HelloAsso (ex. un pour les
 particuliers, un pour les professionnels), un second (ou troisième) formulaire
@@ -254,29 +328,48 @@ php bin/console app:user:create client@example.com "mot-de-passe" --client=<slug
 
 ## Tâches planifiées
 
-Deux tâches sont enregistrées via Symfony Scheduler dans `src/Scheduler/AppSchedule.php` :
-rattrapage HelloAsso toutes les minutes (`app:helloasso:fetch`), purge des vieux
-paiements chaque nuit à 3h (`app:payments:purge`).
+Trois tâches sont enregistrées via Symfony Scheduler dans
+`src/Scheduler/AppSchedule.php` : rattrapage HelloAsso toutes les 10 min
+(`app:helloasso:fetch`, qui distribue le travail sur la file `async`), purge des
+paiements crédités toutes les 6 h (`app:payments:purge`), purge du journal
+d'activité chaque nuit à 3h30 (`app:activity-log:purge`). Le planning est
+`stateful` avec `processOnlyLastMissedRun(true)` : après un arrêt du worker,
+chaque tâche manquée est rattrapée **une seule fois** au redémarrage, pas une
+fois par créneau sauté.
 
 **Important : le Scheduler ne "tourne" pas tout seul.** Les expressions cron ne
 sont évaluées que par un worker qui reste actif en continu et consomme le
-transport `scheduler_default` :
+transport `scheduler_default` ; un second worker consomme la file `async`
+(crédit Cyclos des paiements webhook, rattrapage par client, e-mails) :
 
 ```bash
 php bin/console messenger:consume scheduler_default
+php bin/console messenger:consume async
 ```
 
-Si ce process ne tourne pas, aucune tâche planifiée ne se déclenche — ce n'est
-pas un service en arrière-plan démarré automatiquement par PHP ou Symfony. En
-production, il doit être supervisé pour redémarrer en cas de crash (unité
-systemd avec `Restart=always`, service Supervisor, ou conteneur worker dédié
-dans Docker) et rester actif en permanence.
+Si ces process ne tournent pas, aucune tâche planifiée ne se déclenche et les
+paiements reçus par webhook ne sont pas crédités — ce ne sont pas des services
+démarrés automatiquement par PHP ou Symfony. En production, ils doivent être
+supervisés pour redémarrer en cas de crash (unités systemd avec
+`Restart=always`, cf. `docs/DEPLOIEMENT_DEBIAN13.md`).
 
-## Tests
+## Tests & qualité de code
 
 ```bash
-php bin/phpunit
+php bin/phpunit           # tests (unitaires + fonctionnels — nécessite la base de test)
+composer phpstan          # analyse statique (PHPStan niveau 6, baseline dans phpstan-baseline.neon)
+composer cs               # style de code (PHP-CS-Fixer, --dry-run)
+composer cs-fix           # applique le style
 ```
+
+Le workflow GitHub Actions `.github/workflows/ci.yml` rejoue tout cela (plus
+`lint:twig` / `lint:yaml` / `lint:container` et `doctrine:schema:validate`) sur
+chaque *push* `main` et *pull request*, avec un service MariaDB pour les tests
+fonctionnels.
+
+`phpstan-baseline.neon` gèle les avertissements pré-existants ; tout nouveau code
+est analysé au niveau 6. Le style suit PSR-12 (sans conditions Yoda, pour rester
+cohérent avec l'existant).
 
 ## Déploiement en production
 
@@ -298,9 +391,8 @@ sudo apt install -y mariadb-server nginx git unzip curl \
     php8.4-curl php8.4-intl php8.4-opcache php8.4-zip
 ```
 
-**Le paquet `composer.lock` de Cyllos exige PHP ≥ 8.4** (même si
-`composer.json` affiche `>=8.2`, c'est le fichier `.lock` — les versions
-exactes réellement installées — qui fait foi). Ni Debian 12, ni Ubuntu
+**Cyllos exige PHP ≥ 8.4** (`composer.json` : `"php": ">=8.4"` ; le `composer.lock`
+verrouille des paquets Symfony qui réclament `>=8.4.1`). Ni Debian 12, ni Ubuntu
 24.04 LTS ne fournissent PHP 8.4 dans leurs dépôts officiels par défaut : un
 dépôt tiers est nécessaire dans les deux cas.
 

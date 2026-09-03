@@ -114,6 +114,175 @@ class PaymentRepository extends ServiceEntityRepository
     }
 
     /**
+     * Number of payments still "todo" past $threshold that belong to a client with
+     * automatic crediting enabled. For such a client a webhook payment should be
+     * picked up by the worker within seconds and leave the "todo" state; a growing
+     * count here means the async worker is not consuming (see /health).
+     */
+    public function countStuckAutomaticTodoPayments(\DateTimeImmutable $threshold): int
+    {
+        return (int) $this->createQueryBuilder('p')
+            ->select('COUNT(p.id)')
+            ->join('p.client', 'c')
+            ->join('c.setting', 's')
+            ->andWhere('p.status = :todo')
+            ->andWhere('s.paymentAutomaticEnabled = true')
+            ->andWhere('p.insertionDate < :threshold')
+            ->setParameter('todo', PaymentStatus::Todo)
+            ->setParameter('threshold', $threshold)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /**
+     * Payment counts grouped by status for payments inserted on/after $since.
+     * Statuses with no payment in the window are simply absent from the map.
+     *
+     * @return array<string, int> status value => count
+     */
+    public function countByStatusSince(\DateTimeImmutable $since): array
+    {
+        $rows = $this->createQueryBuilder('p')
+            ->select('p.status AS status, COUNT(p.id) AS c')
+            ->andWhere('p.insertionDate >= :since')
+            ->setParameter('since', $since)
+            ->groupBy('p.status')
+            ->getQuery()
+            ->getResult();
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $status = $row['status'];
+            $counts[$status instanceof PaymentStatus ? $status->value : (string) $status] = (int) $row['c'];
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Sum of payment amounts grouped by status for payments inserted on/after
+     * $since (admin dashboard "money" figures). Absent statuses mean zero.
+     *
+     * @return array<string, float> status value => summed amount
+     */
+    public function sumAmountByStatusSince(\DateTimeImmutable $since): array
+    {
+        $rows = $this->createQueryBuilder('p')
+            ->select('p.status AS status, SUM(p.amount) AS total')
+            ->andWhere('p.insertionDate >= :since')
+            ->setParameter('since', $since)
+            ->groupBy('p.status')
+            ->getQuery()
+            ->getResult();
+
+        $totals = [];
+        foreach ($rows as $row) {
+            // p.status is an enumType mapping, so getResult() hydrates it to a PaymentStatus.
+            $totals[$row['status']->value] = (float) $row['total'];
+        }
+
+        return $totals;
+    }
+
+    /**
+     * One aggregate row per active client for the dashboard's per-client table:
+     * payment counts (total / credited / failed / to-handle) and credited amount
+     * over the window, plus the client's mode flags. Clients with no payment in
+     * the window are still listed (zeros) — a client that just went quiet is
+     * exactly what an admin wants to spot. "lastPaymentAt" here is scoped to the
+     * window; the caller fills in the last-ever date separately.
+     *
+     * @return list<array{clientId: int, name: string, total: int, credited: int, failed: int, toHandle: int, amountCredited: float, cyclosEnabled: bool, automaticEnabled: bool}>
+     */
+    public function perClientStatsSince(\DateTimeImmutable $since): array
+    {
+        $credited = [PaymentStatus::Success, PaymentStatus::SuccessAuto];
+        $toHandle = [PaymentStatus::Todo, PaymentStatus::TooHigh, PaymentStatus::TooLate, PaymentStatus::Waiting, PaymentStatus::PreviewOk];
+
+        $rows = $this->getEntityManager()->createQueryBuilder()
+            ->select(
+                'c.id AS clientId',
+                'c.name AS name',
+                'COUNT(p.id) AS total',
+                'SUM(CASE WHEN p.status IN (:credited) THEN 1 ELSE 0 END) AS credited',
+                'SUM(CASE WHEN p.status = :fail THEN 1 ELSE 0 END) AS failed',
+                'SUM(CASE WHEN p.status IN (:toHandle) THEN 1 ELSE 0 END) AS toHandle',
+                'SUM(CASE WHEN p.status IN (:credited) THEN p.amount ELSE 0 END) AS amountCredited',
+                's.paymentCyclosEnabled AS cyclosEnabled',
+                's.paymentAutomaticEnabled AS automaticEnabled',
+            )
+            ->from(Client::class, 'c')
+            ->leftJoin('c.payments', 'p', 'WITH', 'p.insertionDate >= :since')
+            ->leftJoin('c.setting', 's')
+            ->andWhere('c.active = true')
+            ->groupBy('c.id')
+            ->addGroupBy('c.name')
+            ->addGroupBy('s.paymentCyclosEnabled')
+            ->addGroupBy('s.paymentAutomaticEnabled')
+            ->orderBy('c.name', 'ASC')
+            ->setParameter('since', $since)
+            ->setParameter('credited', $credited)
+            ->setParameter('fail', PaymentStatus::Fail)
+            ->setParameter('toHandle', $toHandle)
+            ->getQuery()
+            ->getResult();
+
+        return array_map(static fn (array $row): array => [
+            'clientId' => (int) $row['clientId'],
+            'name' => (string) $row['name'],
+            'total' => (int) $row['total'],
+            'credited' => (int) $row['credited'],
+            'failed' => (int) $row['failed'],
+            'toHandle' => (int) $row['toHandle'],
+            'amountCredited' => (float) $row['amountCredited'],
+            'cyclosEnabled' => (bool) $row['cyclosEnabled'],
+            'automaticEnabled' => (bool) $row['automaticEnabled'],
+        ], $rows);
+    }
+
+    /**
+     * Last payment insertion date per client id, all history (no window) —
+     * merged into perClientStatsSince() rows for the "last payment" column.
+     *
+     * @return array<int, \DateTimeImmutable>
+     */
+    public function lastPaymentAtByClient(): array
+    {
+        $rows = $this->createQueryBuilder('p')
+            ->select('IDENTITY(p.client) AS clientId, MAX(p.insertionDate) AS lastAt')
+            ->groupBy('p.client')
+            ->getQuery()
+            ->getResult();
+
+        $map = [];
+        foreach ($rows as $row) {
+            // MAX() comes back as a string, never a hydrated DateTimeImmutable.
+            $map[(int) $row['clientId']] = new \DateTimeImmutable((string) $row['lastAt']);
+        }
+
+        return $map;
+    }
+
+    /**
+     * Most recent payments in a given status, client eager-loaded (admin dashboard
+     * "latest failures" panel).
+     *
+     * @return Payment[]
+     */
+    public function findRecentByStatus(PaymentStatus $status, int $limit = 5): array
+    {
+        return $this->createQueryBuilder('p')
+            ->leftJoin('p.client', 'c')
+            ->addSelect('c')
+            ->andWhere('p.status = :status')
+            ->setParameter('status', $status)
+            ->orderBy('p.insertionDate', 'DESC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * @return Payment[]
      */
     public function findByStatus(PaymentStatus $status, ?Client $client = null): array
@@ -167,7 +336,7 @@ class PaymentRepository extends ServiceEntityRepository
             ->andWhere(
                 'p.payerFirstName LIKE :q OR p.payerLastName LIKE :q OR p.email LIKE :q'
                 . " OR CONCAT(p.payerFirstName, ' ', p.payerLastName) LIKE :q"
-                . " OR CONCAT(p.payerLastName, ' ', p.payerFirstName) LIKE :q"
+                . " OR CONCAT(p.payerLastName, ' ', p.payerFirstName) LIKE :q",
             )
             ->setParameter('q', '%' . $query . '%')
             ->orderBy('p.paymentDate', 'DESC')

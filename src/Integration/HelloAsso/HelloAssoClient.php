@@ -92,13 +92,13 @@ class HelloAssoClient
 
         try {
             $now = new \DateTimeImmutable();
-            $beginDate = $now->modify(sprintf('-%d days', $nbDays));
+            $beginDate = $now->modify(\sprintf('-%d days', $nbDays));
             $query = [
                 'from' => $beginDate->format(DATE_ATOM),
                 'to' => $now->format(DATE_ATOM),
                 'states' => 'Authorized',
             ];
-            $url = $this->buildUrl($config, sprintf(
+            $url = $this->buildUrl($config, \sprintf(
                 'v5/organizations/%s/forms/%s/%s/payments',
                 rawurlencode($config->getOrganizationSlug()),
                 rawurlencode($config->getFormType()),
@@ -255,7 +255,7 @@ class HelloAssoClient
                 $reason = $this->describeTokenError($data);
                 $this->apiCallLogger->record('helloasso', 'POST', $url, '(identifiants OAuth2 — non journalisés)', $response->getStatusCode(), $reason, 'Authentification OAuth2 — échec');
 
-                throw new HelloAssoException(sprintf('HelloAsso token response did not contain an access_token (HTTP %d): %s', $response->getStatusCode(), $reason));
+                throw new HelloAssoException(\sprintf('HelloAsso token response did not contain an access_token (HTTP %d): %s', $response->getStatusCode(), $reason));
             }
 
             $this->apiCallLogger->record('helloasso', 'POST', $url, '(identifiants OAuth2 — non journalisés)', $response->getStatusCode(), '(jeton d\'accès — non journalisé)', 'Authentification OAuth2');
@@ -281,7 +281,7 @@ class HelloAssoClient
 
         if (\is_string($error) && $error !== '') {
             return \is_string($description) && $description !== ''
-                ? sprintf('%s (%s)', $error, $description)
+                ? \sprintf('%s (%s)', $error, $description)
                 : $error;
         }
 

@@ -39,12 +39,12 @@ class PurgePaymentsCommand extends Command
         $io = new SymfonyStyle($input, $output);
         $retentionDays = (int) $input->getOption('retention-days');
 
-        $threshold = (new \DateTimeImmutable())->modify(sprintf('-%d days', $retentionDays));
+        $threshold = (new \DateTimeImmutable())->modify(\sprintf('-%d days', $retentionDays));
         $ids = $this->paymentRepository->findPurgeableIdsByInsertionDateBefore($threshold);
 
         $this->paymentRepository->deleteByIds($ids);
 
-        $io->success(sprintf('%d paiement(s) crédité(s) supprimé(s) (rétention : %d jours). Les paiements non traités ou en échec ne sont jamais purgés.', \count($ids), $retentionDays));
+        $io->success(\sprintf('%d paiement(s) crédité(s) supprimé(s) (rétention : %d jours). Les paiements non traités ou en échec ne sont jamais purgés.', \count($ids), $retentionDays));
 
         return Command::SUCCESS;
     }

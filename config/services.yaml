@@ -25,6 +25,15 @@ services:
     App\Security\SecretEncryptor:
         arguments:
             $encryptionKey: '%env(APP_ENCRYPTION_KEY)%'
+            $legacyKeys: '%env(APP_ENCRYPTION_KEYS_LEGACY)%'
+
+    App\Integration\HelloAsso\HelloAssoClient:
+        arguments:
+            $httpClient: '@helloasso.client'
+
+    App\Integration\Cyclos\CyclosClient:
+        arguments:
+            $httpClient: '@cyclos.client'
 
     App\Notification\NotificationMailer:
         arguments:
@@ -33,6 +42,11 @@ services:
     App\Command\PurgePaymentsCommand:
         arguments:
             $defaultRetentionDays: '%env(int:PAYMENT_RETENTION_DAYS)%'
+
+    App\Command\PurgeActivityLogCommand:
+        arguments:
+            $apiRetentionDays: '%env(int:ACTIVITY_LOG_API_RETENTION_DAYS)%'
+            $retentionDays: '%env(int:ACTIVITY_LOG_RETENTION_DAYS)%'
 
     App\Client\ClientLogoUploader:
         arguments:

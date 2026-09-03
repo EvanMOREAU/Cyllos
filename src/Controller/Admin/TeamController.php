@@ -76,7 +76,7 @@ class TeamController extends AbstractController
                 $this->entityManager->persist($user);
                 $this->entityManager->flush();
 
-                $this->addFlash('success', sprintf('Le compte "%s" a été créé.', $user->getEmail()));
+                $this->addFlash('success', \sprintf('Le compte "%s" a été créé.', $user->getEmail()));
 
                 return $this->redirectToRoute('admin_team_list');
             }
@@ -105,7 +105,7 @@ class TeamController extends AbstractController
         if ($form->isSubmitted() && $form->isValid()) {
             $user->setPassword($this->passwordHasher->hashPassword($user, $form->getData()['plainPassword']));
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('Le mot de passe de "%s" a été réinitialisé.', $user->getEmail()));
+            $this->addFlash('success', \sprintf('Le mot de passe de "%s" a été réinitialisé.', $user->getEmail()));
 
             return $this->redirectToRoute('admin_team_list');
         }
@@ -131,7 +131,7 @@ class TeamController extends AbstractController
         if ($this->isCsrfTokenValid('delete_team_user_' . $user->getId(), $request->request->get('_token'))) {
             $this->entityManager->remove($user);
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('Le compte "%s" a été supprimé.', $user->getEmail()));
+            $this->addFlash('success', \sprintf('Le compte "%s" a été supprimé.', $user->getEmail()));
         }
 
         return $this->redirectToRoute('admin_team_list');
@@ -152,7 +152,7 @@ class TeamController extends AbstractController
         if ($this->isCsrfTokenValid('toggle_active_' . $user->getId(), $request->request->get('_token'))) {
             $user->setActive(!$user->isActive());
             $this->entityManager->flush();
-            $this->addFlash('success', sprintf('Le compte "%s" a été %s.', $user->getEmail(), $user->isActive() ? 'réactivé' : 'désactivé'));
+            $this->addFlash('success', \sprintf('Le compte "%s" a été %s.', $user->getEmail(), $user->isActive() ? 'réactivé' : 'désactivé'));
         }
 
         return $this->redirectToRoute('admin_team_list');

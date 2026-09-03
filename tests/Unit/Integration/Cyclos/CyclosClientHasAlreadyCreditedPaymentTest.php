@@ -60,7 +60,7 @@ class CyclosClientHasAlreadyCreditedPaymentTest extends TestCase
         self::assertTrue($client->hasAlreadyCreditedPayment(
             $this->makeConfig(),
             'eric.debelair@gmail.com',
-            'Paiement automatique, id technique 65456',
+            ['Paiement automatique, id technique 65456'],
         ));
     }
 
@@ -75,7 +75,25 @@ class CyclosClientHasAlreadyCreditedPaymentTest extends TestCase
         self::assertFalse($client->hasAlreadyCreditedPayment(
             $this->makeConfig(),
             'eric.debelair@gmail.com',
-            'Paiement automatique, id technique 65456',
+            ['Paiement automatique, id technique 65456'],
+        ));
+    }
+
+    public function testMatchesAnyOfTheCandidateDescriptions(): void
+    {
+        // Client switched its Cyclos description prefix: the earlier credit is
+        // on file under the legacy wording, the "current" candidate is the new
+        // one — passing both must still detect the duplicate.
+        $httpClient = new MockHttpClient(new MockResponse(json_encode([
+            ['description' => 'Paiement automatique, id technique 65456'],
+        ])));
+
+        $client = $this->makeClient($httpClient);
+
+        self::assertTrue($client->hasAlreadyCreditedPayment(
+            $this->makeConfig(),
+            'eric.debelair@gmail.com',
+            ['Recharge instantanée 65456', 'Paiement automatique, id technique 65456'],
         ));
     }
 
@@ -88,7 +106,7 @@ class CyclosClientHasAlreadyCreditedPaymentTest extends TestCase
         self::assertFalse($client->hasAlreadyCreditedPayment(
             $this->makeConfig(),
             'eric.debelair@gmail.com',
-            'Paiement automatique, id technique 65456',
+            ['Paiement automatique, id technique 65456'],
         ));
     }
 }

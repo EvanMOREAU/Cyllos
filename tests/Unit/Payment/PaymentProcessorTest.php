@@ -12,14 +12,18 @@ use App\Entity\PaymentStatus;
 use App\Integration\Cyclos\CyclosClient;
 use App\Integration\HelloAsso\HelloAssoClient;
 use App\Integration\HelloAsso\HelloAssoFetchedPayment;
+use App\Integration\HelloAsso\HelloAssoNotificationPayload;
 use App\Notification\NotificationMailer;
 use App\Payment\PaymentProcessor;
 use App\Repository\EmailAliasRepository;
 use App\Repository\HelloAssoConfigRepository;
 use App\Repository\PaymentRepository;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\NullLogger;
+use Symfony\Component\Messenger\Envelope;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * Covers the manual-sync auto-credit behaviour: PaymentProcessor::fetchMissingPayments()
@@ -69,9 +73,14 @@ class PaymentProcessorTest extends TestCase
         CyclosClient $cyclosClient,
         NotificationMailer $mailer,
         ?EmailAliasRepository $emailAliasRepository = null,
+        ?PaymentRepository $paymentRepository = null,
+        ?EntityManagerInterface $entityManager = null,
+        ?HelloAssoConfigRepository $helloAssoConfigRepository = null,
     ): PaymentProcessor {
-        $entityManager = $this->createStub(EntityManagerInterface::class);
-        $paymentRepository = $this->createStub(PaymentRepository::class);
+        $entityManager ??= $this->createStub(EntityManagerInterface::class);
+        if ($paymentRepository === null) {
+            $paymentRepository = $this->createStub(PaymentRepository::class);
+        }
         $paymentRepository->method('findAllHelloAssoIdsForClient')->willReturn([]);
 
         if ($emailAliasRepository === null) {
@@ -79,15 +88,19 @@ class PaymentProcessorTest extends TestCase
             $emailAliasRepository->method('findOneByClientAndSourceEmail')->willReturn(null);
         }
 
+        $messageBus = $this->createStub(MessageBusInterface::class);
+        $messageBus->method('dispatch')->willReturnCallback(static fn (object $message): Envelope => new Envelope($message));
+
         return new PaymentProcessor(
             $entityManager,
             $paymentRepository,
             $emailAliasRepository,
-            $this->createStub(HelloAssoConfigRepository::class),
+            $helloAssoConfigRepository ?? $this->createStub(HelloAssoConfigRepository::class),
             $helloAssoClient,
             $cyclosClient,
             $mailer,
             new NullLogger(),
+            $messageBus,
         );
     }
 
@@ -146,8 +159,36 @@ class PaymentProcessorTest extends TestCase
         $cyclosClient->expects(self::never())->method('findUserByEmail');
 
         $mailer = $this->createMock(NotificationMailer::class);
-        $mailer->expects(self::once())->method('send')
-            ->with('ops@example.com', self::stringContains('limite'), self::anything());
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'over_limit', self::anything());
+
+        $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
+
+        $added = $processor->fetchMissingPayments($client, attemptAutomaticCredit: true);
+
+        self::assertSame(1, $added);
+    }
+
+    /**
+     * A HelloAsso payment whose date can't be parsed must not be auto-credited:
+     * parseDate() falls back to the Unix epoch so isLate() flags it, and it is
+     * left for manual review with a "late payment" alert.
+     */
+    public function testManualSyncDoesNotAutoCreditPaymentWithUnparseableDate(): void
+    {
+        $client = $this->makeClient(automatic: true);
+
+        $helloAssoClient = $this->createStub(HelloAssoClient::class);
+        $helloAssoClient->method('fetchPaymentsHistory')->willReturn([
+            new HelloAssoFetchedPayment(999, 2000, 'pas-une-date', 'Jean', 'Dupont', 'jean@example.com'),
+        ]);
+
+        $cyclosClient = $this->createMock(CyclosClient::class);
+        $cyclosClient->expects(self::never())->method('findUserByEmail');
+
+        $mailer = $this->createMock(NotificationMailer::class);
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'too_late', self::anything());
 
         $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
 
@@ -304,5 +345,132 @@ class PaymentProcessorTest extends TestCase
 
         $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
         $processor->creditManually($payment);
+    }
+
+    private function makeTodoPayment(Client $client, \DateTimeImmutable $paymentDate): Payment
+    {
+        $payment = new Payment(
+            client: $client,
+            helloAssoConfig: $client->getHelloAssoConfigs()->first(),
+            helloAssoPaymentId: 4242,
+            paymentDate: $paymentDate,
+            amount: 20.0,
+            payerFirstName: 'Jean',
+            payerLastName: 'Dupont',
+            email: 'jean@example.com',
+        );
+        $payment->setStatus(PaymentStatus::Todo);
+
+        return $payment;
+    }
+
+    private function makeProcessorForQueued(Payment $payment, CyclosClient $cyclosClient, NotificationMailer $mailer): PaymentProcessor
+    {
+        $paymentRepository = $this->createStub(PaymentRepository::class);
+        $paymentRepository->method('find')->willReturn($payment);
+
+        return $this->makeProcessor($this->createStub(HelloAssoClient::class), $cyclosClient, $mailer, null, $paymentRepository);
+    }
+
+    public function testQueuedProcessingMarksALatePaymentTooLateWithoutCrediting(): void
+    {
+        $client = $this->makeClient(automatic: true);
+        $payment = $this->makeTodoPayment($client, (new \DateTimeImmutable())->modify('-13 hours'));
+
+        $cyclosClient = $this->createMock(CyclosClient::class);
+        $cyclosClient->expects(self::never())->method('findUserByEmail');
+
+        $mailer = $this->createMock(NotificationMailer::class);
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'too_late', self::anything());
+
+        $this->makeProcessorForQueued($payment, $cyclosClient, $mailer)->processQueuedPayment(4242, reportedWaiting: false);
+
+        self::assertSame(PaymentStatus::TooLate, $payment->getStatus());
+    }
+
+    public function testQueuedProcessingMarksAWaitingPaymentWaitingWithoutCrediting(): void
+    {
+        $client = $this->makeClient(automatic: true);
+        $payment = $this->makeTodoPayment($client, (new \DateTimeImmutable())->modify('-1 hour'));
+
+        $cyclosClient = $this->createMock(CyclosClient::class);
+        $cyclosClient->expects(self::never())->method('findUserByEmail');
+
+        $mailer = $this->createMock(NotificationMailer::class);
+        $mailer->expects(self::once())->method('sendForClient')
+            ->with(self::isInstanceOf(Client::class), 'ops@example.com', 'waiting', self::anything());
+
+        $this->makeProcessorForQueued($payment, $cyclosClient, $mailer)->processQueuedPayment(4242, reportedWaiting: true);
+
+        self::assertSame(PaymentStatus::Waiting, $payment->getStatus());
+    }
+
+    public function testQueuedProcessingIsANoOpWhenPaymentIsNoLongerTodo(): void
+    {
+        $client = $this->makeClient(automatic: true);
+        $payment = $this->makeTodoPayment($client, (new \DateTimeImmutable())->modify('-1 hour'));
+        $payment->setStatus(PaymentStatus::SuccessAuto); // already handled (redelivered message)
+
+        $cyclosClient = $this->createMock(CyclosClient::class);
+        $cyclosClient->expects(self::never())->method('findUserByEmail');
+
+        $mailer = $this->createMock(NotificationMailer::class);
+        $mailer->expects(self::never())->method('sendForClient');
+
+        $this->makeProcessorForQueued($payment, $cyclosClient, $mailer)->processQueuedPayment(4242, reportedWaiting: false);
+
+        self::assertSame(PaymentStatus::SuccessAuto, $payment->getStatus());
+    }
+
+    /**
+     * Two webhook deliveries of the same payment can both pass the "already known"
+     * check and race to insert. The loser hits the unique index; that must be
+     * swallowed (return null, no ProcessPaymentMessage) instead of bubbling up as
+     * a 500 that makes HelloAsso retry.
+     */
+    public function testWebhookSwallowsAConcurrentDuplicateInsert(): void
+    {
+        $client = $this->makeClient(automatic: true);
+
+        $payload = new HelloAssoNotificationPayload(
+            helloAssoPaymentId: 555,
+            amountCents: 2000,
+            rawDate: (new \DateTimeImmutable())->format(DATE_ATOM),
+            state: 'Authorized',
+            payerFirstName: 'Jean',
+            payerLastName: 'Dupont',
+            payerEmail: 'jean@example.com',
+            formSlug: 'form',
+        );
+
+        $helloAssoClient = $this->createStub(HelloAssoClient::class);
+        $helloAssoClient->method('parseNotification')->willReturn($payload);
+
+        $haConfigRepo = $this->createStub(HelloAssoConfigRepository::class);
+        $haConfigRepo->method('findOneActiveByClientAndFormSlug')->willReturn($client->getHelloAssoConfigs()->first());
+
+        $paymentRepository = $this->createStub(PaymentRepository::class);
+        $paymentRepository->method('findOneByClientAndHelloAssoId')->willReturn(null); // not "already known" at check time
+
+        $entityManager = $this->createStub(EntityManagerInterface::class);
+        $entityManager->method('flush')->willThrowException($this->createStub(UniqueConstraintViolationException::class));
+
+        $messageBus = $this->createMock(MessageBusInterface::class);
+        $messageBus->expects(self::never())->method('dispatch');
+
+        $processor = new PaymentProcessor(
+            $entityManager,
+            $paymentRepository,
+            $this->createStub(EmailAliasRepository::class),
+            $haConfigRepo,
+            $helloAssoClient,
+            $this->createStub(CyclosClient::class),
+            $this->createStub(NotificationMailer::class),
+            new NullLogger(),
+            $messageBus,
+        );
+
+        self::assertNull($processor->handleWebhookNotification($client, ['eventType' => 'Payment']));
     }
 }

@@ -16,6 +16,13 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  */
 class CyclosClient
 {
+    /**
+     * Default prefix for the Cyclos transaction description; the HelloAsso
+     * payment id is appended. A client can override it via
+     * ClientCustomization::getCyclosDescriptionPrefix() — PaymentProcessor
+     * still checks this legacy value too when looking for a duplicate, so a
+     * client that switches prefix can't get a payment double-credited.
+     */
     public const PAYMENT_DESCRIPTION_PREFIX = 'Paiement automatique, id technique ';
 
     /**
@@ -103,7 +110,12 @@ class CyclosClient
      * a payment's local status was reset, and re-crediting it went through
      * because an unrelated transaction had since become "the last one").
      */
-    public function hasAlreadyCreditedPayment(CyclosConfig $config, string $email, string $expectedDescription): bool
+    /**
+     * @param non-empty-list<string> $expectedDescriptions descriptions that would
+     *        identify this payment as already credited — usually the one Cyllos
+     *        would write now, plus any legacy form of it (see PaymentProcessor).
+     */
+    public function hasAlreadyCreditedPayment(CyclosConfig $config, string $email, array $expectedDescriptions): bool
     {
         try {
             $response = $this->request($config, 'GET', rawurlencode($email) . '/transactions', [
@@ -123,7 +135,7 @@ class CyclosClient
             }
 
             foreach ($response->toArray(false) as $transaction) {
-                if (($transaction['description'] ?? null) === $expectedDescription) {
+                if (\in_array($transaction['description'] ?? null, $expectedDescriptions, true)) {
                     return true;
                 }
             }
