@@ -34,6 +34,17 @@ class Client
     private \DateTimeImmutable $createdAt;
 
     /**
+     * Shared secret embedded in the client's HelloAsso webhook URL
+     * (/webhook/helloasso/{slug}/{webhookToken}). HelloAsso does not sign its
+     * notifications, so this token is the only thing that authenticates an
+     * incoming payload as really coming from this client's HelloAsso account.
+     * 64 hex chars = 32 random bytes; generated on creation, rotatable via
+     * regenerateWebhookToken().
+     */
+    #[ORM\Column(length: 64, unique: true)]
+    private string $webhookToken;
+
+    /**
      * Stored filename of the client's logo in public/uploads/client-logos/, if any.
      */
     #[ORM\Column(length: 255, nullable: true)]
@@ -73,6 +84,12 @@ class Client
         $this->createdAt = new \DateTimeImmutable();
         $this->payments = new ArrayCollection();
         $this->helloAssoConfigs = new ArrayCollection();
+        $this->webhookToken = self::generateWebhookToken();
+    }
+
+    private static function generateWebhookToken(): string
+    {
+        return bin2hex(random_bytes(32));
     }
 
     public function getId(): ?int
@@ -119,6 +136,22 @@ class Client
     public function getCreatedAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function getWebhookToken(): string
+    {
+        return $this->webhookToken;
+    }
+
+    /**
+     * Issues a fresh webhook token. The client's HelloAsso notification URL must
+     * be updated accordingly, otherwise incoming payloads stop being accepted.
+     */
+    public function regenerateWebhookToken(): static
+    {
+        $this->webhookToken = self::generateWebhookToken();
+
+        return $this;
     }
 
     public function getLogoFilename(): ?string

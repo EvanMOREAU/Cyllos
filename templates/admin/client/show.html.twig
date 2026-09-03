@@ -14,8 +14,7 @@
                 <span class="dot {{ client.active ? 'dot--active' : 'dot--inactive' }}"></span>
                 {{ client.active ? 'Client actif' : 'Client inactif' }}
                 <span class="text-muted">·</span>
-                <span class="text-muted">Webhook :</span>
-                <code title="{{ absolute_url(path('webhook_helloasso', {clientSlug: client.slug})) }}">{{ path('webhook_helloasso', {clientSlug: client.slug}) }}</code>
+                <a class="text-muted" href="#webhook-card">Voir l'URL de webhook</a>
             </span>
         </span>
     </span>
@@ -135,6 +134,28 @@
                     <div class="kv-row"><dt>Notif. paiement réussi</dt><dd>{{ client.setting.notifySuccessOnPayment ? 'Activé' : 'Désactivé' }}</dd></div>
                     <div class="kv-row"><dt>Notif. paiement en échec</dt><dd>{{ client.setting.notifyFailureOnPayment ? 'Activé' : 'Désactivé' }}</dd></div>
                 </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="card card--section" id="webhook-card">
+        <div class="card__header">
+            <div>
+                <h2>URL de webhook HelloAsso</h2>
+                <p>À renseigner comme URL de notification dans HelloAsso — la même quel que soit le nombre de formulaires du client. Le jeton en fin d'URL authentifie les notifications : ne le diffusez pas.</p>
+            </div>
+            <form method="post" action="{{ path('admin_client_regenerate_webhook_token', {id: client.id}) }}" data-confirm-title="Régénérer le jeton" data-confirm-message="Générer un nouveau jeton pour ce client ? L'URL actuelle cessera immédiatement de fonctionner tant que HelloAsso n'est pas mis à jour." data-confirm-confirm-label="Régénérer">
+                <input type="hidden" name="_token" value="{{ csrf_token('regenerate_webhook_token_' ~ client.id) }}">
+                <button class="btn btn--secondary btn--sm" type="submit">{{ icons.render('sync') }} Régénérer le jeton</button>
+            </form>
+        </div>
+        <div class="card__body">
+            {% set webhookUrl = absolute_url(path('webhook_helloasso', {clientSlug: client.slug, token: client.webhookToken})) %}
+            <div class="copy-field" data-controller="copy">
+                <code class="copy-field__value" data-copy-target="source" title="{{ webhookUrl }}">{{ webhookUrl }}</code>
+                <button type="button" class="copy-field__btn" data-action="copy#copy" aria-label="Copier l'URL de webhook">
+                    {{ icons.render('copy') }} <span data-copy-target="button">Copier</span>
+                </button>
             </div>
         </div>
     </div>

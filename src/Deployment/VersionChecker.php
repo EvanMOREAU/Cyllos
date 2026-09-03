@@ -81,7 +81,7 @@ class VersionChecker
                 aheadBy: 0,
                 checkedAt: $now,
                 compareUrl: null,
-                errorMessage: "Commit local introuvable (pas de dépôt git déployé et APP_COMMIT_SHA non défini).",
+                errorMessage: 'Commit local introuvable (pas de dépôt git déployé et APP_COMMIT_SHA non défini).',
                 upstreamRepo: $this->upstreamRepo,
                 upstreamBranch: $this->upstreamBranch,
             );
@@ -90,7 +90,7 @@ class VersionChecker
         try {
             $response = $this->httpClient->request(
                 'GET',
-                sprintf('https://api.github.com/repos/%s/compare/%s...%s', $this->upstreamRepo, $localCommit, $this->upstreamBranch),
+                \sprintf('https://api.github.com/repos/%s/compare/%s...%s', $this->upstreamRepo, $localCommit, $this->upstreamBranch),
                 ['headers' => $this->headers()],
             );
 
@@ -105,7 +105,7 @@ class VersionChecker
             }
 
             if ($statusCode >= 300) {
-                return $this->unavailable($localCommit, $now, sprintf('GitHub a répondu avec le code %d.', $statusCode));
+                return $this->unavailable($localCommit, $now, \sprintf('GitHub a répondu avec le code %d.', $statusCode));
             }
 
             $data = $response->toArray(false);
@@ -140,7 +140,7 @@ class VersionChecker
                 behindBy: (int) ($data['ahead_by'] ?? 0),
                 aheadBy: (int) ($data['behind_by'] ?? 0),
                 checkedAt: $now,
-                compareUrl: $data['html_url'] ?? sprintf('https://github.com/%s/compare/%s...%s', $this->upstreamRepo, $localCommit, $this->upstreamBranch),
+                compareUrl: $data['html_url'] ?? \sprintf('https://github.com/%s/compare/%s...%s', $this->upstreamRepo, $localCommit, $this->upstreamBranch),
                 errorMessage: null,
                 upstreamRepo: $this->upstreamRepo,
                 upstreamBranch: $this->upstreamBranch,

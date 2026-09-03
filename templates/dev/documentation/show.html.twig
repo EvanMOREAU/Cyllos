@@ -24,6 +24,7 @@
         <a href="#cyclos" data-docs-toc-target="link">Intégration Cyclos</a>
         <a href="#webhook" data-docs-toc-target="link">Webhook &amp; rattrapage</a>
         <a href="#scheduler" data-docs-toc-target="link">Tâches planifiées</a>
+        <a href="#supervision" data-docs-toc-target="link">Supervision — /health</a>
         <a href="#journal" data-docs-toc-target="link">Journal d'activité &amp; traçabilité API</a>
         <a href="#notifications" data-docs-toc-target="link">Notifications par e-mail</a>
         <a href="#mot-de-passe-oublie" data-docs-toc-target="link">Mot de passe oublié</a>
@@ -344,6 +345,20 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                 committée. Générée via :
             </p>
             <div class="docs-code">php bin/console app:generate-encryption-key</div>
+            <p>
+                <strong>Rotation</strong> : le chiffrement utilise toujours
+                <code>APP_ENCRYPTION_KEY</code> ; le déchiffrement essaie cette clé puis chacune de
+                <code>APP_ENCRYPTION_KEYS_LEGACY</code> (clés précédentes, séparées par des
+                virgules, déchiffrement seul). Après avoir promu une nouvelle clé,
+                <code>php bin/console app:secrets:reencrypt</code> (<code>--dry-run</code> pour un
+                aperçu) ré-écrit chaque secret stocké avec la nouvelle clé —
+                <code>HelloAssoConfig.clientSecret</code>, <code>CyclosConfig.password</code>
+                <strong>et</strong> <code>User.totpSecret</code> — les valeurs indéchiffrables
+                étant signalées, jamais écrasées — après quoi
+                <code>APP_ENCRYPTION_KEYS_LEGACY</code> peut être vidée.
+                <code>SecretEncryptor::isEncryptedWithPrimaryKey()</code> permet à la commande de
+                sauter les secrets déjà à jour.
+            </p>
             <h3>Comptes désactivés</h3>
             <p>
                 <code>active = false</code> est appliqué au moment de l'authentification par
@@ -435,6 +450,16 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                 méthode privée <code>request()</code> — point de passage unique qui centralise
                 l'authentification, le timeout, et désormais la journalisation (voir
                 <a href="#journal" data-docs-toc-target="link">Journal d'activité</a>).
+            </p>
+            <p>
+                Le client HTTP injecté est le client scellé <code>cyclos.client</code>
+                (<code>config/packages/http_client.yaml</code>) : il réessaie les échecs
+                transitoires (429/5xx, erreurs réseau, 3 tentatives, backoff exponentiel) mais
+                <strong>jamais</strong> une requête non idempotente — le <code>POST</code> de
+                <code>system/payments</code> n'est pas rejoué, sinon une réponse perdue sur un
+                paiement déjà appliqué créditerait deux fois (<code>App\Http\NonMutatingRetryStrategy</code>).
+                HelloAsso utilise de même <code>helloasso.client</code>, avec la stratégie de retry
+                par défaut (ses seuls POST — le jeton OAuth2 — sont sans effet de bord).
             </p>
             <table class="docs-table">
                 <thead><tr><th>Méthode</th><th>Endpoint Cyclos</th><th>Rôle</th></tr></thead>
@@ -544,9 +569,14 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
             </p>
             <ul>
                 <li>
-                    <strong>Webhook temps réel</strong> — <code>POST /webhook/helloasso/{clientSlug}</code>
+                    <strong>Webhook temps réel</strong> — <code>POST /webhook/helloasso/{clientSlug}/{token}</code>
                     (<code>WebhookController</code>), une seule URL <strong>par client</strong>, pas
-                    par formulaire. Si un client a plusieurs formulaires HelloAsso, les deux (ou
+                    par formulaire. HelloAsso ne signant pas ses notifications, le <code>token</code>
+                    (secret propre au client, <code>Client::webhookToken</code>, régénérable depuis la
+                    fiche client) authentifie l'appel via <code>hash_equals()</code> ; un token absent
+                    ou faux renvoie <code>404</code> sans rien créer. L'ancienne URL sans token
+                    (<code>webhook_helloasso_legacy</code>) ne fait plus que journaliser un
+                    avertissement et renvoyer <code>404</code>. Si un client a plusieurs formulaires HelloAsso, les deux (ou
                     plus) pointent vers cette même URL côté HelloAsso ("Intégrations et API" de
                     chaque formulaire) — c'est <code>PaymentProcessor</code> qui distingue ensuite
                     lequel est concerné, via le <code>formSlug</code> inclus dans le corps de la
@@ -554,28 +584,47 @@ protected function voteOnAttribute(string $attribute, mixed $subject, TokenInter
                     Aucune configuration webhook à changer en ajoutant un second formulaire. Nécessite
                     qu'un humain configure cette URL côté HelloAsso pour chaque formulaire. Sans ça,
                     aucun crédit automatique en temps réel — mais voir le point suivant.
+                    <br>
+                    Le webhook ne fait que valider et enregistrer le <code>Payment</code> en
+                    <code>Todo</code> puis répondre <code>200</code> ; s'il est éligible au crédit
+                    automatique, un message <code>ProcessPaymentMessage</code> est poussé sur la file
+                    <code>async</code> et c'est le worker <code>cyllos-worker</code>
+                    (<code>messenger:consume async</code>) qui effectue le crédit Cyclos et les
+                    e-mails. Traitement idempotent : un message rejoué qui retrouve le paiement hors
+                    <code>Todo</code> ne fait rien.
+                    <br>
+                    La route est limitée en débit par <code>{clientSlug}</code>
+                    (<code>rate_limiter.webhook</code>, 30 req/min) — un flux au-delà renvoie
+                    <code>429</code>.
                 </li>
                 <li>
                     <strong>Rattrapage périodique</strong> — <code>app:helloasso:fetch</code>,
-                    exécuté par le Scheduler toutes les minutes. Interroge directement l'historique
+                    exécuté par le Scheduler. La commande ne fait pas le travail : elle pousse un
+                    <code>FetchClientPaymentsMessage</code> par client actif sur la file
+                    <code>async</code>, avec un <code>DelayStamp</code> aléatoire de 0–30 s (jitter),
+                    et <code>cyllos-worker</code> traite chaque client isolément — un client lent ou
+                    en erreur ne retarde plus les autres. Interroge directement l'historique
                     HelloAsso via l'API (authentification OAuth2 avec les identifiants du client),
                     <strong>complètement indépendant de la configuration du webhook</strong>. Un
                     client peut donc voir ses paiements apparaître dans Cyllos sans jamais avoir
                     configuré de webhook — c'est le rattrapage qui fait le travail. Les paiements
                     ainsi récupérés par ce rattrapage planifié restent toujours <code>Todo</code> :
                     c'est un filet de sécurité pour un webhook manqué, pas une deuxième voie de
-                    crédit automatique.
+                    crédit automatique. (<code>--sync</code> : traitement en ligne sans passer par la
+                    file ; <code>--client &lt;slug&gt;</code> : un seul client, en ligne.)
                 </li>
                 <li>
-                    <strong>Synchro manuelle</strong> — même commande sous-jacente
-                    (<code>PaymentProcessor::fetchMissingPayments()</code>), déclenchée par le
-                    bouton "Synchro HelloAsso" sur la fiche client. Contrairement au rattrapage
-                    planifié, chaque paiement nouvellement récupéré est ensuite passé dans la même
-                    décision de crédit automatique que le webhook (<code>$attemptAutomaticCredit
-                    = true</code>) : si <code>paymentAutomaticEnabled</code> est actif pour ce
-                    client, et que le paiement n'est ni trop élevé (<code>maxAmount</code>) ni trop
-                    ancien (<code>NUMBER_LATE_HOURS_ACCEPTED</code>), Cyllos tente immédiatement de
-                    le créditer sur Cyclos — exactement comme s'il venait d'arriver par webhook.
+                    <strong>Synchro manuelle</strong> — le bouton "Synchro HelloAsso" sur la fiche
+                    client émet un <code>FetchClientPaymentsMessage</code> avec
+                    <code>attemptAutomaticCredit: true</code> ; le worker exécute
+                    <code>PaymentProcessor::fetchMissingPayments()</code> hors de la requête HTTP.
+                    Contrairement au rattrapage planifié, chaque paiement nouvellement récupéré
+                    passe ensuite dans la même décision de crédit automatique que le webhook : si
+                    <code>paymentAutomaticEnabled</code> est actif pour ce client, et que le
+                    paiement n'est ni trop élevé (<code>maxAmount</code>) ni trop ancien
+                    (<code>NUMBER_LATE_HOURS_ACCEPTED</code>), Cyllos tente de le créditer sur
+                    Cyclos — exactement comme s'il venait d'arriver par webhook. Les résultats
+                    apparaissent dans la liste des paiements une fois le worker passé.
                 </li>
             </ul>
         </section>
@@ -593,25 +642,69 @@ class AppSchedule implements ScheduleProviderInterface
     {
         return (new Schedule())
             ->with(
-                RecurringMessage::cron('* * * * *', new RunCommandMessage('app:helloasso:fetch')),
-                RecurringMessage::cron('0 3 * * *', new RunCommandMessage('app:payments:purge')),
+                RecurringMessage::cron('*/10 * * * *', new RunCommandMessage('app:helloasso:fetch')),
+                RecurringMessage::cron('0 */6 * * *', new RunCommandMessage('app:payments:purge')),
+                RecurringMessage::cron('30 3 * * *', new RunCommandMessage('app:activity-log:purge')),
             )
-            ->stateful($this->scheduleCache);
+            ->stateful($this->scheduleCache)
+            ->processOnlyLastMissedRun(true);
     }
 }</div>
+            <p>
+                <code>processOnlyLastMissedRun(true)</code> : après un arrêt du worker, chaque
+                tâche manquée est rejouée <strong>une seule fois</strong> au redémarrage (le
+                rattrapage est un filet de sécurité, les purges sont idempotentes — un backlog en
+                rafale n'apporte rien).
+            </p>
             <div class="docs-note docs-note--warning">
                 {{ icons.render('sync') }}
                 <p>
-                    Déclarer un <code>Schedule</code> ne suffit pas à le faire tourner. Il faut un
-                    <strong>worker actif en continu</strong> qui consomme le transport
-                    <code>scheduler_default</code> :
+                    Déclarer un <code>Schedule</code> ne suffit pas à le faire tourner. Il faut
+                    <strong>deux workers actifs en continu</strong> : l'un consomme le transport
+                    <code>scheduler_default</code> (évalue les cron), l'autre la file
+                    <code>async</code> (exécute le rattrapage par client, le crédit Cyclos des
+                    paiements webhook, les e-mails) :
                 </p>
             </div>
-            <div class="docs-code">php bin/console messenger:consume scheduler_default</div>
+            <div class="docs-code">php bin/console messenger:consume scheduler_default
+php bin/console messenger:consume async</div>
             <p>
-                Sans ce process (supervisé en production par systemd/Supervisor/conteneur dédié,
-                avec redémarrage automatique), aucune tâche planifiée ne se déclenche — ni le
-                rattrapage HelloAsso, ni la purge des paiements.
+                Sans ces process (supervisés en production par systemd, avec redémarrage
+                automatique — cf. <code>docs/DEPLOIEMENT_DEBIAN13.md</code>), aucune tâche
+                planifiée ne se déclenche et les paiements reçus par webhook ne sont pas crédités.
+            </p>
+        </section>
+
+        <section id="supervision" class="docs-section" data-docs-toc-target="section">
+            <h2>Supervision — <code>GET /health</code></h2>
+            <p>
+                <code>HealthController</code>, route <strong>non authentifiée</strong>
+                (<code>PUBLIC_ACCESS</code>), pensée pour une sonde externe. Renvoie un JSON
+                <code>{ status, time, checks }</code> où <code>status</code> vaut <code>ok</code>,
+                <code>degraded</code> ou <code>down</code> :
+            </p>
+            <table class="docs-table">
+                <thead><tr><th>Check</th><th>Contenu</th><th>Passe en <code>degraded</code> si…</th></tr></thead>
+                <tbody>
+                    <tr><td><code>database</code></td><td><code>SELECT 1</code></td><td>— (une base injoignable met tout le rapport à <code>down</code> + HTTP 503)</td></tr>
+                    <tr><td><code>queue</code></td><td>file <code>async</code> : messages en attente, en échec, âge du plus ancien disponible</td><td>au moins un message en échec, ou plus ancien message en attente depuis &gt; 5 min</td></tr>
+                    <tr><td><code>stuckPayments</code></td><td>paiements <code>todo</code> de plus de 15 min chez un client en crédit automatique</td><td>count &gt; 0 (symptôme d'un <code>cyllos-worker</code> arrêté)</td></tr>
+                </tbody>
+            </table>
+            <p>
+                Code HTTP <code>200</code> pour <code>ok</code> comme pour <code>degraded</code>
+                (le détail est dans le corps), <code>503</code> uniquement si la base ne répond
+                pas. <strong>Aucun appel à HelloAsso ni Cyclos</strong> : les solliciter à chaque
+                interrogation de la sonde serait contre-productif (et demanderait les identifiants
+                OAuth d'un client).
+            </p>
+            <p>
+                Côté humain, le <strong>tableau de bord admin</strong>
+                (<code>/admin/tableau-de-bord</code>, <code>DashboardController</code>, page
+                d'accueil des comptes <code>ROLE_ADMIN</code>) reprend les mêmes signaux —
+                état de la file <code>async</code> (via <code>QueueStatus</code>, partagé avec
+                <code>/health</code>), paiements bloqués — et y ajoute les statistiques de
+                paiement sur 30 jours et la liste des clients actifs silencieux depuis &gt; 48 h.
             </p>
         </section>
 
@@ -727,6 +820,15 @@ public function record(
                     de le laisser cocher des cases qui n'auront silencieusement aucun effet.
                 </p>
             </div>
+            <p>
+                Tous les e-mails transactionnels (dépassement de limite, retard, attente, succès,
+                échec, erreur de traitement manuel) passent par
+                <code>NotificationMailer::sendTranslated(destinataires, cléSujet, cléCorps, params)</code> :
+                sujet et corps viennent du domaine de traduction <code>emails</code>
+                (<code>translations/emails.&lt;locale&gt;.yaml</code>), les libellés ne sont plus codés
+                en dur dans <code>PaymentProcessor</code>. Placeholders : <code>%id%</code>,
+                <code>%amount%</code> (déjà formaté), <code>%errors%</code>.
+            </p>
         </section>
 
         <section id="mot-de-passe-oublie" class="docs-section" data-docs-toc-target="section">
@@ -830,6 +932,17 @@ public function record(
                 <code>data-confirmed=true</code> après confirmation, pour ne pas re-déclencher
                 l'interception.
             </p>
+            <h3>Champ copiable</h3>
+            <p>
+                <code>.copy-field</code> + contrôleur <code>copy_controller.js</code> : une valeur
+                monospace sur une seule ligne (défilement horizontal si besoin) et un bouton qui
+                copie la cible <code>data-copy-target="source"</code> dans le presse-papiers
+                (<code>navigator.clipboard</code>, repli <code>execCommand</code> hors contexte
+                sécurisé), puis affiche brièvement « Copié ! ». Utilisé pour l'URL de webhook sur
+                la fiche client (section pleine largeur "URL de webhook HelloAsso", entre les
+                cartes de configuration et les comptes utilisateurs) ; le bouton "Régénérer le
+                jeton" est l'action d'en-tête de cette section.
+            </p>
             <h3>Pagination</h3>
             <p>
                 Chaque repository paginé retourne la même forme de tableau —
@@ -864,15 +977,19 @@ public function record(
                 <thead><tr><th>Variable</th><th>Rôle</th></tr></thead>
                 <tbody>
                     <tr><td>DATABASE_URL</td><td>Connexion MariaDB/MySQL</td></tr>
-                    <tr><td>APP_ENCRYPTION_KEY</td><td>Clé AES-256-GCM pour les secrets HelloAsso/Cyclos en base</td></tr>
+                    <tr><td>APP_ENCRYPTION_KEY</td><td>Clé AES-256-GCM (primaire) pour les secrets HelloAsso/Cyclos en base</td></tr>
+                    <tr><td>APP_ENCRYPTION_KEYS_LEGACY</td><td>Clés précédentes (virgules), déchiffrement seul, le temps d'une rotation — cf. <code>app:secrets:reencrypt</code></td></tr>
                     <tr><td>PAYMENT_RETENTION_DAYS</td><td>Délai de rétention avant purge des paiements crédités (7 jours par défaut)</td></tr>
+                    <tr><td>ACTIVITY_LOG_API_RETENTION_DAYS / ACTIVITY_LOG_RETENTION_DAYS</td><td>Rétention du journal : traces d'appels API (14 j) et lignes d'audit (365 j) — <code>app:activity-log:purge</code></td></tr>
+                    <tr><td>MESSENGER_TRANSPORT_DSN</td><td>Transport de la file <code>async</code> (Doctrine par défaut)</td></tr>
                     <tr><td>MAILER_DSN / MAILER_FROM</td><td>Envoi d'e-mails (alertes, notifications)</td></tr>
                     <tr><td>GITHUB_UPSTREAM_REPO / _BRANCH / GITHUB_TOKEN</td><td>Comparaison de version sur <code>/dev/version</code></td></tr>
                     <tr><td>APP_COMMIT_SHA</td><td>Commit courant si déployé sans dossier <code>.git</code> (artefact de build)</td></tr>
                 </tbody>
             </table>
-            <p>Processus requis en continu au-delà du serveur web :</p>
-            <div class="docs-code">php bin/console messenger:consume scheduler_default   # rattrapage + purge</div>
+            <p>Processus requis en continu au-delà du serveur web (cf. <a href="#scheduler" data-docs-toc-target="link">Tâches planifiées</a>) :</p>
+            <div class="docs-code">php bin/console messenger:consume scheduler_default   # évalue les cron (rattrapage, purges)
+php bin/console messenger:consume async               # crédit Cyclos webhook, rattrapage par client, e-mails</div>
         </section>
 
         <section id="mise-a-jour" class="docs-section" data-docs-toc-target="section">
@@ -889,6 +1006,7 @@ public function record(
                 <li><code>doctrine:migrations:migrate --no-interaction</code></li>
                 <li><code>cache:clear --no-interaction</code></li>
                 <li><code>asset-map:compile --no-interaction</code></li>
+                <li><em>facultatif</em> — <code>sudo -n systemctl restart cyllos-worker cyllos-scheduler</code></li>
             </ol>
             <p>
                 Chaque étape est exécutée via <code>Symfony\Component\Process\Process</code> ; à la
@@ -896,6 +1014,18 @@ public function record(
                 qu'exécutées à l'aveugle sur un état intermédiaire incohérent. Le résultat détaillé
                 (code de sortie et sortie de chaque étape) s'affiche directement sur la page —
                 aucune étape n'est silencieuse.
+            </p>
+            <p>
+                <strong>Verrou</strong> : <code>run()</code> prend un <code>flock</code> exclusif
+                non bloquant sur <code>var/deploy.lock</code>. Un second déclenchement pendant qu'un
+                déploiement tourne renvoie <code>locked = true</code> (badge « Déjà en cours »),
+                sans rien exécuter.
+                <strong>Redémarrage des workers</strong> : dernière étape, marquée
+                <code>optional</code>. Elle ne fait pas échouer le déploiement si elle échoue (le
+                code est déjà en place) — sans règle <code>sudoers</code> sans mot de passe
+                (documentée dans <code>DEPLOIEMENT_DEBIAN13.md</code>), elle affiche simplement la
+                commande à lancer à la main. À défaut, les workers se rechargent seuls au prochain
+                cycle <code>--time-limit</code> (1 h).
             </p>
             <div class="docs-note docs-note--warning">
                 {{ icons.render('sync') }}
@@ -930,6 +1060,22 @@ public function record(
                     est correct.
                 </p>
             </div>
+            <h3>Analyse statique &amp; style</h3>
+            <p>
+                <code>composer phpstan</code> (PHPStan niveau 6, extensions Symfony + Doctrine ;
+                <code>phpstan-baseline.neon</code> gèle les avertissements pré-existants, tout code
+                nouveau est vérifié) et <code>composer cs</code> / <code>cs-fix</code>
+                (PHP-CS-Fixer, base PSR-12 sans conditions Yoda pour coller à l'existant).
+            </p>
+            <h3>Intégration continue</h3>
+            <p>
+                <code>.github/workflows/ci.yml</code> rejoue sur chaque <em>push</em> <code>main</code>
+                et <em>pull request</em> : <code>composer validate</code>, migrations sur une base
+                MariaDB de service, <code>lint:yaml</code> / <code>lint:twig</code> /
+                <code>lint:container</code>, <code>doctrine:schema:validate</code>,
+                <code>phpstan</code>, <code>php-cs-fixer --dry-run</code> et
+                <code>phpunit</code>.
+            </p>
         </section>
 
         <section id="historique" class="docs-section" data-docs-toc-target="section">

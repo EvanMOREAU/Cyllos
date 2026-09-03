@@ -23,7 +23,7 @@ class ClientLogoUploader
     public function upload(Client $client, UploadedFile $file): void
     {
         $safeName = $this->slugger->slug($client->getSlug())->lower();
-        $newFilename = sprintf('%s-%s.%s', $safeName, bin2hex(random_bytes(6)), $file->guessExtension() ?: 'png');
+        $newFilename = \sprintf('%s-%s.%s', $safeName, bin2hex(random_bytes(6)), $file->guessExtension() ?: 'png');
 
         $file->move($this->uploadDirectory, $newFilename);
 

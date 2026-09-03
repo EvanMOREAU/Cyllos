@@ -43,6 +43,35 @@ class ActivityLogRepository extends ServiceEntityRepository
     }
 
     /**
+     * Deletes outbound API call traces (action "api.*") older than the given
+     * date — the bulk of the table, and the least useful to keep long-term.
+     */
+    public function deleteApiCallsOlderThan(\DateTimeImmutable $date): int
+    {
+        return (int) $this->createQueryBuilder('l')
+            ->delete()
+            ->andWhere('l.createdAt < :date')
+            ->andWhere('l.action LIKE :apiPrefix')
+            ->setParameter('date', $date)
+            ->setParameter('apiPrefix', 'api.%')
+            ->getQuery()
+            ->execute();
+    }
+
+    /**
+     * Deletes every log row (audit lines included) older than the given date.
+     */
+    public function deleteOlderThan(\DateTimeImmutable $date): int
+    {
+        return (int) $this->createQueryBuilder('l')
+            ->delete()
+            ->andWhere('l.createdAt < :date')
+            ->setParameter('date', $date)
+            ->getQuery()
+            ->execute();
+    }
+
+    /**
      * @return array{items: ActivityLog[], total: int, page: int, perPage: int, pageCount: int}
      */
     public function paginate(int $page, int $perPage, bool $includeHelloAssoCalls = true): array

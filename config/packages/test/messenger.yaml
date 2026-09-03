@@ -1,0 +1,8 @@
+framework:
+    messenger:
+        # Keep async messages in memory during tests: no worker runs, so this both
+        # lets tests assert what was dispatched (messenger.transport.async->getSent())
+        # and stops deferred work (payment processing, e-mails) from reaching the
+        # real HelloAsso/Cyclos endpoints.
+        transports:
+            async: 'in-memory://'

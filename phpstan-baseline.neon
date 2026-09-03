@@ -1,0 +1,283 @@
+parameters:
+	ignoreErrors:
+		-
+			message: '#^Property App\\ActivityLog\\ActivityLogSubscriber\:\:\$pending type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/ActivityLog/ActivityLogSubscriber.php
+
+		-
+			message: '#^Call to an undefined method Symfony\\Component\\Security\\Core\\User\\UserInterface\:\:getClient\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: src/Controller/App/PaymentController.php
+
+		-
+			message: '#^Method App\\Controller\\SettingsController\:\:settingsViewData\(\) has parameter \$emailForm with generic interface Symfony\\Component\\Form\\FormInterface but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Controller/SettingsController.php
+
+		-
+			message: '#^Method App\\Controller\\SettingsController\:\:settingsViewData\(\) has parameter \$notificationsForm with generic interface Symfony\\Component\\Form\\FormInterface but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Controller/SettingsController.php
+
+		-
+			message: '#^Method App\\Controller\\SettingsController\:\:settingsViewData\(\) has parameter \$passwordForm with generic interface Symfony\\Component\\Form\\FormInterface but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Controller/SettingsController.php
+
+		-
+			message: '#^Dead catch \- Symfony\\Contracts\\HttpClient\\Exception\\ExceptionInterface is never thrown in the try block\.$#'
+			identifier: catch.neverThrown
+			count: 1
+			path: src/Deployment/VersionChecker.php
+
+		-
+			message: '#^Method App\\Deployment\\VersionChecker\:\:headers\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Deployment/VersionChecker.php
+
+		-
+			message: '#^Property App\\Entity\\Client\:\:\$helloAssoConfigs type mapping mismatch\: property can contain Doctrine\\Common\\Collections\\Collection but database expects Doctrine\\Common\\Collections\\Collection&iterable\<App\\Entity\\HelloAssoConfig\>\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/Client.php
+
+		-
+			message: '#^Property App\\Entity\\Client\:\:\$helloAssoConfigs with generic interface Doctrine\\Common\\Collections\\Collection does not specify its types\: TKey, T$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Entity/Client.php
+
+		-
+			message: '#^Property App\\Entity\\Client\:\:\$payments type mapping mismatch\: property can contain Doctrine\\Common\\Collections\\Collection but database expects Doctrine\\Common\\Collections\\Collection&iterable\<App\\Entity\\Payment\>\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/Client.php
+
+		-
+			message: '#^Property App\\Entity\\Client\:\:\$payments with generic interface Doctrine\\Common\\Collections\\Collection does not specify its types\: TKey, T$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Entity/Client.php
+
+		-
+			message: '#^Property App\\Entity\\ClientSetting\:\:\$client type mapping mismatch\: property can contain App\\Entity\\Client\|null but database expects App\\Entity\\Client\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/ClientSetting.php
+
+		-
+			message: '#^Property App\\Entity\\CyclosConfig\:\:\$client type mapping mismatch\: property can contain App\\Entity\\Client\|null but database expects App\\Entity\\Client\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/CyclosConfig.php
+
+		-
+			message: '#^Property App\\Entity\\EmailAlias\:\:\$client type mapping mismatch\: property can contain App\\Entity\\Client\|null but database expects App\\Entity\\Client\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/EmailAlias.php
+
+		-
+			message: '#^Property App\\Entity\\HelloAssoConfig\:\:\$client type mapping mismatch\: property can contain App\\Entity\\Client\|null but database expects App\\Entity\\Client\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/HelloAssoConfig.php
+
+		-
+			message: '#^Property App\\Entity\\Payment\:\:\$client type mapping mismatch\: property can contain App\\Entity\\Client\|null but database expects App\\Entity\\Client\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/Payment.php
+
+		-
+			message: '#^Property App\\Entity\\Payment\:\:\$helloAssoConfig type mapping mismatch\: property can contain App\\Entity\\HelloAssoConfig\|null but database expects App\\Entity\\HelloAssoConfig\.$#'
+			identifier: doctrine.associationType
+			count: 1
+			path: src/Entity/Payment.php
+
+		-
+			message: '#^Class App\\Form\\AdminUserType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/AdminUserType.php
+
+		-
+			message: '#^Class App\\Form\\ChangeEmailType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ChangeEmailType.php
+
+		-
+			message: '#^Class App\\Form\\ChangePasswordType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ChangePasswordType.php
+
+		-
+			message: '#^Class App\\Form\\ClientInfoType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ClientInfoType.php
+
+		-
+			message: '#^Class App\\Form\\ClientNotificationPreferencesType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ClientNotificationPreferencesType.php
+
+		-
+			message: '#^Class App\\Form\\ClientSettingType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ClientSettingType.php
+
+		-
+			message: '#^Class App\\Form\\ClientUserType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ClientUserType.php
+
+		-
+			message: '#^Method App\\Form\\ClientWizardState\:\:all\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Form/ClientWizardState.php
+
+		-
+			message: '#^Method App\\Form\\ClientWizardState\:\:set\(\) has parameter \$data with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Form/ClientWizardState.php
+
+		-
+			message: '#^Class App\\Form\\ConfirmPasswordType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ConfirmPasswordType.php
+
+		-
+			message: '#^Class App\\Form\\CyclosConfigType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/CyclosConfigType.php
+
+		-
+			message: '#^Class App\\Form\\EmailAliasType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/EmailAliasType.php
+
+		-
+			message: '#^Class App\\Form\\ForgotPasswordType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ForgotPasswordType.php
+
+		-
+			message: '#^Class App\\Form\\HelloAssoConfigType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/HelloAssoConfigType.php
+
+		-
+			message: '#^Class App\\Form\\ResetPasswordType extends generic class Symfony\\Component\\Form\\AbstractType but does not specify its types\: TData$#'
+			identifier: missingType.generics
+			count: 1
+			path: src/Form/ResetPasswordType.php
+
+		-
+			message: '#^Method App\\Integration\\Cyclos\\CyclosClient\:\:loggableRequestBody\(\) has parameter \$options with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Integration/Cyclos/CyclosClient.php
+
+		-
+			message: '#^Method App\\Integration\\Cyclos\\CyclosClient\:\:request\(\) has parameter \$options with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Integration/Cyclos/CyclosClient.php
+
+		-
+			message: '#^Method App\\Integration\\HelloAsso\\HelloAssoClient\:\:describeTokenError\(\) has parameter \$data with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Integration/HelloAsso/HelloAssoClient.php
+
+		-
+			message: '#^Method App\\Integration\\HelloAsso\\HelloAssoClient\:\:parseNotification\(\) has parameter \$rawPayload with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Integration/HelloAsso/HelloAssoClient.php
+
+		-
+			message: '#^Method App\\Payment\\PaymentProcessor\:\:handleWebhookNotification\(\) has parameter \$rawPayload with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: src/Payment/PaymentProcessor.php
+
+		-
+			message: '#^Instanceof between App\\Entity\\PaymentStatus and App\\Entity\\PaymentStatus will always evaluate to true\.$#'
+			identifier: instanceof.alwaysTrue
+			count: 1
+			path: src/Repository/PaymentRepository.php
+
+		-
+			message: '#^Method App\\Tests\\Functional\\DashboardControllerTest\:\:loginAs\(\) has parameter \$roles with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: tests/Functional/DashboardControllerTest.php
+
+		-
+			message: '#^Parameter \#1 \$array of function sort contains unresolvable type\.$#'
+			identifier: argument.unresolvableType
+			count: 1
+			path: tests/Functional/FetchHelloAssoPaymentsCommandTest.php
+
+		-
+			message: '#^Method App\\Tests\\Functional\\NotificationMailerTest\:\:captureEmail\(\) has parameter \$params with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: tests/Functional/NotificationMailerTest.php
+
+		-
+			message: '#^Method App\\Tests\\Functional\\WebhookControllerTest\:\:paymentPayload\(\) has parameter \$overrides with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: tests/Functional/WebhookControllerTest.php
+
+		-
+			message: '#^Method App\\Tests\\Functional\\WebhookControllerTest\:\:paymentPayload\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: tests/Functional/WebhookControllerTest.php
+
+		-
+			message: '#^Method App\\Tests\\Unit\\Integration\\HelloAsso\\HelloAssoClientParseNotificationTest\:\:validPayload\(\) has parameter \$overrides with no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: tests/Unit/Integration/HelloAsso/HelloAssoClientParseNotificationTest.php
+
+		-
+			message: '#^Method App\\Tests\\Unit\\Integration\\HelloAsso\\HelloAssoClientParseNotificationTest\:\:validPayload\(\) return type has no value type specified in iterable type array\.$#'
+			identifier: missingType.iterableValue
+			count: 1
+			path: tests/Unit/Integration/HelloAsso/HelloAssoClientParseNotificationTest.php
+
+		-
+			message: '#^Call to an undefined method App\\Repository\\PaymentRepository\:\:method\(\)\.$#'
+			identifier: method.notFound
+			count: 1
+			path: tests/Unit/Payment/PaymentProcessorTest.php
+
+		-
+			message: '#^Call to function method_exists\(\) with ''Symfony\\\\Component\\\\Dotenv\\\\Dotenv'' and ''bootEnv'' will always evaluate to true\.$#'
+			identifier: function.alreadyNarrowedType
+			count: 1
+			path: tests/bootstrap.php

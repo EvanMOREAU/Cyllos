@@ -20,7 +20,7 @@ class GenerateEncryptionKeyCommand extends Command
         $key = base64_encode(random_bytes(32));
 
         $io->success('Generated encryption key. Add this to your .env.local (never commit it):');
-        $io->writeln(sprintf('APP_ENCRYPTION_KEY=%s', $key));
+        $io->writeln(\sprintf('APP_ENCRYPTION_KEY=%s', $key));
 
         return Command::SUCCESS;
     }

@@ -3,6 +3,7 @@
 namespace App\Payment;
 
 use App\Entity\Client;
+use App\Entity\ClientSetting;
 use App\Entity\HelloAssoConfig;
 use App\Entity\Payment;
 use App\Entity\PaymentStatus;
@@ -10,12 +11,15 @@ use App\Integration\Cyclos\CyclosClient;
 use App\Integration\HelloAsso\HelloAssoClient;
 use App\Integration\HelloAsso\HelloAssoFetchedPayment;
 use App\Integration\HelloAsso\HelloAssoNotificationPayload;
+use App\Message\ProcessPaymentMessage;
 use App\Notification\NotificationMailer;
 use App\Repository\EmailAliasRepository;
 use App\Repository\HelloAssoConfigRepository;
 use App\Repository\PaymentRepository;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
  * Orchestrates the payment lifecycle for a client: validating an incoming HelloAsso
@@ -36,6 +40,7 @@ class PaymentProcessor
         private readonly CyclosClient $cyclosClient,
         private readonly NotificationMailer $mailer,
         private readonly LoggerInterface $logger,
+        private readonly MessageBusInterface $messageBus,
     ) {
     }
 
@@ -43,6 +48,11 @@ class PaymentProcessor
      * Handles a raw HelloAsso webhook payload for a given client. Returns null when
      * the notification was ignored (malformed, "Order" event, wrong form, unknown
      * state...) rather than turned into a Payment.
+     *
+     * The cheap validation and the Payment insert happen inline; the Cyclos credit
+     * attempt (several HelloAsso/Cyclos HTTP calls) is handed to a worker via
+     * ProcessPaymentMessage so the webhook responds before HelloAsso times it out.
+     * The returned status is therefore always "todo" for a freshly-created payment.
      */
     public function handleWebhookNotification(Client $client, array $rawPayload): ?PaymentProcessingResult
     {
@@ -64,12 +74,10 @@ class PaymentProcessor
 
         if ($parsed->amountCents > $haConfig->getMaxAmount() * 100) {
             if (!$alreadyKnown) {
-                $payment = $this->persistNewPayment($client, $haConfig, $parsed, PaymentStatus::TooHigh);
-                $this->mailer->send(
-                    $setting->getMailRecipient(),
-                    '[Cyllos] Paiement dépassant la limite',
-                    sprintf("Un paiement a dépassé la limite autorisée, approbation manuelle requise.\nId : %d\nMontant : %.2f €", $payment->getHelloAssoPaymentId(), $payment->getAmount()),
-                );
+                $payment = $this->persist($this->buildPayment($client, $haConfig, $parsed), PaymentStatus::TooHigh);
+                if ($payment !== null) {
+                    $this->notifyOverLimit($setting, $payment);
+                }
             }
 
             return null;
@@ -93,9 +101,41 @@ class PaymentProcessor
             return null;
         }
 
-        $payment = $this->persistNewPayment($client, $haConfig, $parsed, PaymentStatus::Todo);
+        $payment = $this->persist($this->buildPayment($client, $haConfig, $parsed), PaymentStatus::Todo);
+        if ($payment === null) {
+            return null;
+        }
 
-        return $this->applyAutomaticDecision($client, $payment, $parsed->state === 'Waiting');
+        if ($setting->isPaymentAutomaticEnabled()) {
+            $this->messageBus->dispatch(new ProcessPaymentMessage($payment->getId(), $parsed->state === 'Waiting'));
+        }
+
+        return new PaymentProcessingResult(PaymentStatus::Todo);
+    }
+
+    /**
+     * Worker entry point for ProcessPaymentMessage: runs the automatic-credit
+     * decision for a payment the webhook left as "todo". Idempotent — a redelivered
+     * message finds the payment in a non-"todo" status and does nothing, so it never
+     * re-credits or re-notifies.
+     */
+    public function processQueuedPayment(int $paymentId, bool $reportedWaiting): void
+    {
+        $payment = $this->paymentRepository->find($paymentId);
+
+        if ($payment === null) {
+            $this->logger->warning('ProcessPaymentMessage: payment {id} no longer exists, skipping', ['id' => $paymentId]);
+
+            return;
+        }
+
+        if ($payment->getStatus() !== PaymentStatus::Todo) {
+            $this->logger->debug('ProcessPaymentMessage: payment {id} already in status {status}, skipping', ['id' => $paymentId, 'status' => $payment->getStatus()->value]);
+
+            return;
+        }
+
+        $this->applyAutomaticDecision($payment->getClient(), $payment, $reportedWaiting);
     }
 
     /**
@@ -122,17 +162,9 @@ class PaymentProcessor
                 if ($attemptAutomaticCredit) {
                     $this->ingestFetchedPayment($client, $haConfig, $item);
                 } else {
-                    $payment = new Payment(
-                        client: $client,
-                        helloAssoConfig: $haConfig,
-                        helloAssoPaymentId: $item->helloAssoPaymentId,
-                        paymentDate: $this->parseDate($item->rawDate),
-                        amount: $item->amountCents / 100,
-                        payerFirstName: $item->payerFirstName,
-                        payerLastName: $item->payerLastName,
-                        email: $item->payerEmail,
-                    );
-                    $this->entityManager->persist($payment);
+                    // Safety-net path: record as "todo" (the Payment default status),
+                    // batch-flushed once below.
+                    $this->entityManager->persist($this->buildPayment($client, $haConfig, $item));
                 }
 
                 $known[$item->helloAssoPaymentId] = true;
@@ -141,7 +173,16 @@ class PaymentProcessor
         }
 
         if ($added > 0) {
-            $this->entityManager->flush();
+            try {
+                $this->entityManager->flush();
+            } catch (UniqueConstraintViolationException) {
+                // A concurrent fetch/webhook inserted one of these first. The batch
+                // is lost, but the next scheduled fetch re-discovers anything still
+                // missing — this path is a safety net, not the source of truth.
+                $this->logger->warning('Catch-up fetch for client {slug}: concurrent insert, batch rolled back — next run will retry', ['slug' => $client->getSlug()]);
+
+                return 0;
+            }
         }
 
         return $added;
@@ -157,17 +198,19 @@ class PaymentProcessor
         $setting = $client->getSetting();
 
         if ($item->amountCents > $haConfig->getMaxAmount() * 100) {
-            $payment = $this->persistFetchedPayment($client, $haConfig, $item, PaymentStatus::TooHigh);
-            $this->mailer->send(
-                $setting->getMailRecipient(),
-                '[Cyllos] Paiement dépassant la limite',
-                sprintf("Un paiement a dépassé la limite autorisée, approbation manuelle requise.\nId : %d\nMontant : %.2f €", $payment->getHelloAssoPaymentId(), $payment->getAmount()),
-            );
+            $payment = $this->persist($this->buildPayment($client, $haConfig, $item), PaymentStatus::TooHigh);
+            if ($payment !== null) {
+                $this->notifyOverLimit($setting, $payment);
+            }
 
             return;
         }
 
-        $payment = $this->persistFetchedPayment($client, $haConfig, $item, PaymentStatus::Todo);
+        $payment = $this->persist($this->buildPayment($client, $haConfig, $item), PaymentStatus::Todo);
+        if ($payment === null) {
+            return;
+        }
+
         $this->applyAutomaticDecision($client, $payment, reportedWaiting: false);
     }
 
@@ -188,10 +231,11 @@ class PaymentProcessor
         if ($this->isLate($payment->getPaymentDate())) {
             $payment->setStatus(PaymentStatus::TooLate);
             $this->entityManager->flush();
-            $this->mailer->send(
+            $this->mailer->sendTranslated(
                 $setting->getMailRecipient(),
-                '[Cyllos] Paiement en retard',
-                sprintf('Un paiement a été reçu en retard.\nId : %d', $payment->getHelloAssoPaymentId()),
+                'too_late.subject',
+                'too_late.body',
+                ['%id%' => $payment->getHelloAssoPaymentId()],
             );
 
             return new PaymentProcessingResult(PaymentStatus::TooLate);
@@ -200,10 +244,11 @@ class PaymentProcessor
         if ($reportedWaiting) {
             $payment->setStatus(PaymentStatus::Waiting);
             $this->entityManager->flush();
-            $this->mailer->send(
+            $this->mailer->sendTranslated(
                 $setting->getMailRecipient(),
-                '[Cyllos] Paiement en attente',
-                sprintf("Un paiement a été reçu avec l'état 'Attente'.\nId : %d", $payment->getHelloAssoPaymentId()),
+                'waiting.subject',
+                'waiting.body',
+                ['%id%' => $payment->getHelloAssoPaymentId()],
             );
 
             return new PaymentProcessingResult(PaymentStatus::Waiting);
@@ -216,10 +261,11 @@ class PaymentProcessor
             $this->entityManager->flush();
 
             if ($setting->isNotifySuccessOnPayment() && $client->getContactEmail() !== null) {
-                $this->mailer->send(
+                $this->mailer->sendTranslated(
                     $client->getContactEmail(),
-                    '[Cyllos] Paiement réussi :)',
-                    sprintf('Un paiement a été effectué avec succès.\nId : %d\nMontant : %.2f €', $payment->getHelloAssoPaymentId(), $payment->getAmount()),
+                    'success.subject',
+                    'success.body',
+                    ['%id%' => $payment->getHelloAssoPaymentId(), '%amount%' => \sprintf('%.2f', $payment->getAmount())],
                 );
             }
 
@@ -227,10 +273,11 @@ class PaymentProcessor
         }
 
         if ($setting->isNotifyFailureOnPayment() && $client->getContactEmail() !== null) {
-            $this->mailer->send(
+            $this->mailer->sendTranslated(
                 $client->getContactEmail(),
-                '[Cyllos] Paiement en échec :(',
-                sprintf("Un paiement n'a pas pu être effectué.\nId : %d\nMontant : %.2f €", $payment->getHelloAssoPaymentId(), $payment->getAmount()),
+                'failure.subject',
+                'failure.body',
+                ['%id%' => $payment->getHelloAssoPaymentId(), '%amount%' => \sprintf('%.2f', $payment->getAmount())],
             );
         }
 
@@ -246,10 +293,11 @@ class PaymentProcessor
         $result = $this->creditCyclosAccount($payment->getClient(), $payment);
 
         if (!$result->isSuccessful()) {
-            $this->mailer->send(
+            $this->mailer->sendTranslated(
                 $payment->getClient()->getSetting()->getMailRecipient(),
-                '[Cyllos] Erreur lors du traitement',
-                sprintf("Liste des erreurs pour le paiement %d :\n%s", $payment->getHelloAssoPaymentId(), implode("\n", $result->errors)),
+                'manual_error.subject',
+                'manual_error.body',
+                ['%id%' => $payment->getHelloAssoPaymentId(), '%errors%' => implode("\n", $result->errors)],
             );
         }
 
@@ -294,7 +342,7 @@ class PaymentProcessor
 
         $emissionType = $this->cyclosClient->resolveEmissionType($cyclosConfig, $user);
         if ($emissionType === null) {
-            return $this->fail($payment, sprintf("Le groupe Cyclos de l'utilisateur (%s) n'est pas autorisé à recevoir des paiements automatiques", $user->groupInternalName));
+            return $this->fail($payment, \sprintf("Le groupe Cyclos de l'utilisateur (%s) n'est pas autorisé à recevoir des paiements automatiques", $user->groupInternalName));
         }
 
         $description = CyclosClient::PAYMENT_DESCRIPTION_PREFIX . $payment->getHelloAssoPaymentId();
@@ -328,58 +376,78 @@ class PaymentProcessor
         return new PaymentProcessingResult(PaymentStatus::Fail, [$error]);
     }
 
-    private function persistNewPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoNotificationPayload $parsed, PaymentStatus $status): Payment
+    /**
+     * Builds an unpersisted Payment from either kind of HelloAsso payload — the
+     * webhook notification and the fetched-history item carry the same fields for
+     * this purpose. Does not set a status or flush; see persist().
+     */
+    private function buildPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoNotificationPayload|HelloAssoFetchedPayment $data): Payment
     {
-        $payment = new Payment(
+        return new Payment(
             client: $client,
             helloAssoConfig: $haConfig,
-            helloAssoPaymentId: $parsed->helloAssoPaymentId,
-            paymentDate: $this->parseDate($parsed->rawDate),
-            amount: $parsed->amountCents / 100,
-            payerFirstName: $parsed->payerFirstName,
-            payerLastName: $parsed->payerLastName,
-            email: $parsed->payerEmail,
+            helloAssoPaymentId: $data->helloAssoPaymentId,
+            paymentDate: $this->parseDate($data->rawDate),
+            amount: $data->amountCents / 100,
+            payerFirstName: $data->payerFirstName,
+            payerLastName: $data->payerLastName,
+            email: $data->payerEmail,
         );
-        $payment->setStatus($status);
+    }
 
+    /**
+     * Persists a freshly-built Payment. Returns null when a concurrent request
+     * already inserted the same (client, helloAssoPaymentId) — the unique index
+     * turns the race into a caught "ignore" rather than an uncaught 500 that makes
+     * HelloAsso retry. The EntityManager is closed by the exception, so a null
+     * return means the caller must not touch the ORM afterwards.
+     */
+    private function persist(Payment $payment, PaymentStatus $status): ?Payment
+    {
+        $payment->setStatus($status);
         $this->entityManager->persist($payment);
-        $this->entityManager->flush();
+
+        try {
+            $this->entityManager->flush();
+        } catch (UniqueConstraintViolationException) {
+            $this->logger->debug('Payment {id} was inserted concurrently, ignoring the duplicate', ['id' => $payment->getHelloAssoPaymentId()]);
+
+            return null;
+        }
 
         return $payment;
     }
 
-    private function persistFetchedPayment(Client $client, HelloAssoConfig $haConfig, HelloAssoFetchedPayment $item, PaymentStatus $status): Payment
+    private function notifyOverLimit(ClientSetting $setting, Payment $payment): void
     {
-        $payment = new Payment(
-            client: $client,
-            helloAssoConfig: $haConfig,
-            helloAssoPaymentId: $item->helloAssoPaymentId,
-            paymentDate: $this->parseDate($item->rawDate),
-            amount: $item->amountCents / 100,
-            payerFirstName: $item->payerFirstName,
-            payerLastName: $item->payerLastName,
-            email: $item->payerEmail,
+        $this->mailer->sendTranslated(
+            $setting->getMailRecipient(),
+            'over_limit.subject',
+            'over_limit.body',
+            ['%id%' => $payment->getHelloAssoPaymentId(), '%amount%' => \sprintf('%.2f', $payment->getAmount())],
         );
-        $payment->setStatus($status);
-
-        $this->entityManager->persist($payment);
-        $this->entityManager->flush();
-
-        return $payment;
     }
 
+    /**
+     * Parses a HelloAsso payment date. An unparseable date must never be silently
+     * replaced by "now": that would make a genuinely old payment look fresh and let
+     * it slip through automatic crediting. Instead we fall back to the Unix epoch,
+     * so isLate() flags the payment and it is routed to manual review.
+     */
     private function parseDate(string $rawDate): \DateTimeImmutable
     {
         try {
             return new \DateTimeImmutable($rawDate);
         } catch (\Exception) {
-            return new \DateTimeImmutable();
+            $this->logger->warning('HelloAsso payment date could not be parsed ({raw}); treating the payment as late for manual review', ['raw' => $rawDate]);
+
+            return new \DateTimeImmutable('@0');
         }
     }
 
     private function isLate(\DateTimeImmutable $paymentDate): bool
     {
-        $deadline = $paymentDate->modify(sprintf('+%d hours', self::NUMBER_LATE_HOURS_ACCEPTED));
+        $deadline = $paymentDate->modify(\sprintf('+%d hours', self::NUMBER_LATE_HOURS_ACCEPTED));
 
         return new \DateTimeImmutable() > $deadline;
     }

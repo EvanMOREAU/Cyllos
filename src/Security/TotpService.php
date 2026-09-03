@@ -21,7 +21,7 @@ class TotpService
 
     public function getProvisioningUri(string $secret, string $accountLabel, string $issuer = 'Cyllos'): string
     {
-        return sprintf(
+        return \sprintf(
             'otpauth://totp/%s:%s?secret=%s&issuer=%s&digits=%d&period=%d',
             rawurlencode($issuer),
             rawurlencode($accountLabel),

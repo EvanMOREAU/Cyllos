@@ -38,6 +38,9 @@
                     <nav class="sidebar__nav">
                         {% if is_granted('ROLE_ADMIN') %}
                             <div class="sidebar__section-label">Administration</div>
+                            <a class="nav-link {{ app.request.attributes.get('_route') == 'admin_dashboard' ? 'is-active' : '' }}" href="{{ path('admin_dashboard') }}">
+                                {{ icons.render('payments') }} Tableau de bord
+                            </a>
                             <a class="nav-link {{ app.request.attributes.get('_route') starts with 'admin_client' ? 'is-active' : '' }}" href="{{ path('admin_client_list') }}">
                                 {{ icons.render('clients') }} Clients
                             </a>

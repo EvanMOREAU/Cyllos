@@ -34,7 +34,7 @@ class ClientInfoType extends AbstractType
                 'label' => 'E-mail de contact',
                 'required' => false,
                 'attr' => ['placeholder' => 'contact@client.example'],
-                'help' => "Utilisé pour les notifications de paiement (voir Réglages) et pré-rempli automatiquement sur le tout premier compte utilisateur créé pour ce client.",
+                'help' => 'Utilisé pour les notifications de paiement (voir Réglages) et pré-rempli automatiquement sur le tout premier compte utilisateur créé pour ce client.',
                 'row_attr' => ['class' => 'form-row--span2'],
             ])
             ->add('active', CheckboxType::class, [

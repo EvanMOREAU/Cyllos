@@ -91,21 +91,32 @@
                     <div>
                         <h2>Résultat du déploiement</h2>
                     </div>
-                    {% if deployResult.success %}
+                    {% if deployResult.locked %}
+                        <span class="badge badge--warning">{{ icons.render('sync') }} Déjà en cours</span>
+                    {% elseif deployResult.success %}
                         <span class="badge badge--success">{{ icons.render('check') }} Réussi</span>
                     {% else %}
                         <span class="badge badge--fail">{{ icons.render('x') }} Échec</span>
                     {% endif %}
                 </div>
                 <div class="card__body">
-                    {% for step in deployResult.steps %}
-                        <h4 style="margin-top: {{ loop.first ? '0' : '1.25rem' }};">
-                            {{ step.exitCode == 0 ? icons.render('check') : (step.exitCode is null ? '—' : icons.render('x')) }}
-                            {{ step.label }}
-                            <code class="text-sm">{{ step.command }}</code>
-                        </h4>
-                        <pre class="deploy-result__pre">{{ step.output }}</pre>
-                    {% endfor %}
+                    {% if deployResult.locked %}
+                        <p class="text-muted">Un déploiement est déjà en cours d'exécution sur ce serveur. Réessayez une fois qu'il est terminé.</p>
+                    {% else %}
+                        {% for step in deployResult.steps %}
+                            <h4 style="margin-top: {{ loop.first ? '0' : '1.25rem' }};">
+                                {% if step.optional|default(false) and step.exitCode != 0 %}
+                                    {{ icons.render('sync') }}
+                                {% else %}
+                                    {{ step.exitCode == 0 ? icons.render('check') : (step.exitCode is null ? '—' : icons.render('x')) }}
+                                {% endif %}
+                                {{ step.label }}
+                                {% if step.optional|default(false) %}<span class="badge badge--todo text-sm">facultatif</span>{% endif %}
+                                <code class="text-sm">{{ step.command }}</code>
+                            </h4>
+                            <pre class="deploy-result__pre">{{ step.output }}</pre>
+                        {% endfor %}
+                    {% endif %}
                 </div>
             </div>
         {% endif %}

@@ -114,6 +114,71 @@ class PaymentRepository extends ServiceEntityRepository
     }
 
     /**
+     * Number of payments still "todo" past $threshold that belong to a client with
+     * automatic crediting enabled. For such a client a webhook payment should be
+     * picked up by the worker within seconds and leave the "todo" state; a growing
+     * count here means the async worker is not consuming (see /health).
+     */
+    public function countStuckAutomaticTodoPayments(\DateTimeImmutable $threshold): int
+    {
+        return (int) $this->createQueryBuilder('p')
+            ->select('COUNT(p.id)')
+            ->join('p.client', 'c')
+            ->join('c.setting', 's')
+            ->andWhere('p.status = :todo')
+            ->andWhere('s.paymentAutomaticEnabled = true')
+            ->andWhere('p.insertionDate < :threshold')
+            ->setParameter('todo', PaymentStatus::Todo)
+            ->setParameter('threshold', $threshold)
+            ->getQuery()
+            ->getSingleScalarResult();
+    }
+
+    /**
+     * Payment counts grouped by status for payments inserted on/after $since.
+     * Statuses with no payment in the window are simply absent from the map.
+     *
+     * @return array<string, int> status value => count
+     */
+    public function countByStatusSince(\DateTimeImmutable $since): array
+    {
+        $rows = $this->createQueryBuilder('p')
+            ->select('p.status AS status, COUNT(p.id) AS c')
+            ->andWhere('p.insertionDate >= :since')
+            ->setParameter('since', $since)
+            ->groupBy('p.status')
+            ->getQuery()
+            ->getResult();
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $status = $row['status'];
+            $counts[$status instanceof PaymentStatus ? $status->value : (string) $status] = (int) $row['c'];
+        }
+
+        return $counts;
+    }
+
+    /**
+     * Most recent payments in a given status, client eager-loaded (admin dashboard
+     * "latest failures" panel).
+     *
+     * @return Payment[]
+     */
+    public function findRecentByStatus(PaymentStatus $status, int $limit = 5): array
+    {
+        return $this->createQueryBuilder('p')
+            ->leftJoin('p.client', 'c')
+            ->addSelect('c')
+            ->andWhere('p.status = :status')
+            ->setParameter('status', $status)
+            ->orderBy('p.insertionDate', 'DESC')
+            ->setMaxResults($limit)
+            ->getQuery()
+            ->getResult();
+    }
+
+    /**
      * @return Payment[]
      */
     public function findByStatus(PaymentStatus $status, ?Client $client = null): array
@@ -167,7 +232,7 @@ class PaymentRepository extends ServiceEntityRepository
             ->andWhere(
                 'p.payerFirstName LIKE :q OR p.payerLastName LIKE :q OR p.email LIKE :q'
                 . " OR CONCAT(p.payerFirstName, ' ', p.payerLastName) LIKE :q"
-                . " OR CONCAT(p.payerLastName, ' ', p.payerFirstName) LIKE :q"
+                . " OR CONCAT(p.payerLastName, ' ', p.payerFirstName) LIKE :q",
             )
             ->setParameter('q', '%' . $query . '%')
             ->orderBy('p.paymentDate', 'DESC')
