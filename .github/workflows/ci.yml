@@ -68,6 +68,12 @@ jobs:
       - name: Doctrine schema in sync with mappings
         run: php bin/console doctrine:schema:validate --env=test
 
+      # phpstan.dist.neon points the Symfony extension at the *dev* container XML
+      # (var/cache/dev/App_KernelDevDebugContainer.xml). The job runs APP_ENV=test,
+      # so nothing else compiles that file — build it explicitly here.
+      - name: Warm up the dev container for PHPStan
+        run: php bin/console cache:warmup --env=dev
+
       - name: PHPStan
         run: composer phpstan
 
