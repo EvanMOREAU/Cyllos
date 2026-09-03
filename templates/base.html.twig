@@ -53,6 +53,9 @@
                         {% endif %}
                         {% if is_granted('ROLE_CLIENT') %}
                             <div class="sidebar__section-label">Espace client</div>
+                            <a class="nav-link {{ app.request.attributes.get('_route') == 'app_dashboard' ? 'is-active' : '' }}" href="{{ path('app_dashboard') }}">
+                                {{ icons.render('inbox') }} Tableau de bord
+                            </a>
                             <a class="nav-link {{ app.request.attributes.get('_route') starts with 'app_payment' ? 'is-active' : '' }}" href="{{ path('app_payment_list') }}">
                                 {{ icons.render('payments') }} Mes paiements
                             </a>

@@ -135,23 +135,26 @@ class PaymentRepository extends ServiceEntityRepository
     }
 
     /**
-     * Payment counts grouped by status for payments inserted on/after $since.
-     * Statuses with no payment in the window are simply absent from the map.
+     * Payment counts grouped by status for payments inserted on/after $since,
+     * optionally scoped to a single client (client dashboard). Statuses with no
+     * payment in the window are simply absent from the map.
      *
      * @return array<string, int> status value => count
      */
-    public function countByStatusSince(\DateTimeImmutable $since): array
+    public function countByStatusSince(\DateTimeImmutable $since, ?Client $client = null): array
     {
-        $rows = $this->createQueryBuilder('p')
+        $qb = $this->createQueryBuilder('p')
             ->select('p.status AS status, COUNT(p.id) AS c')
             ->andWhere('p.insertionDate >= :since')
             ->setParameter('since', $since)
-            ->groupBy('p.status')
-            ->getQuery()
-            ->getResult();
+            ->groupBy('p.status');
+
+        if ($client !== null) {
+            $qb->andWhere('p.client = :client')->setParameter('client', $client);
+        }
 
         $counts = [];
-        foreach ($rows as $row) {
+        foreach ($qb->getQuery()->getResult() as $row) {
             $status = $row['status'];
             $counts[$status instanceof PaymentStatus ? $status->value : (string) $status] = (int) $row['c'];
         }
@@ -161,22 +164,25 @@ class PaymentRepository extends ServiceEntityRepository
 
     /**
      * Sum of payment amounts grouped by status for payments inserted on/after
-     * $since (admin dashboard "money" figures). Absent statuses mean zero.
+     * $since ("money" figures), optionally scoped to a single client. Absent
+     * statuses mean zero.
      *
      * @return array<string, float> status value => summed amount
      */
-    public function sumAmountByStatusSince(\DateTimeImmutable $since): array
+    public function sumAmountByStatusSince(\DateTimeImmutable $since, ?Client $client = null): array
     {
-        $rows = $this->createQueryBuilder('p')
+        $qb = $this->createQueryBuilder('p')
             ->select('p.status AS status, SUM(p.amount) AS total')
             ->andWhere('p.insertionDate >= :since')
             ->setParameter('since', $since)
-            ->groupBy('p.status')
-            ->getQuery()
-            ->getResult();
+            ->groupBy('p.status');
+
+        if ($client !== null) {
+            $qb->andWhere('p.client = :client')->setParameter('client', $client);
+        }
 
         $totals = [];
-        foreach ($rows as $row) {
+        foreach ($qb->getQuery()->getResult() as $row) {
             // p.status is an enumType mapping, so getResult() hydrates it to a PaymentStatus.
             $totals[$row['status']->value] = (float) $row['total'];
         }
@@ -269,13 +275,34 @@ class PaymentRepository extends ServiceEntityRepository
      *
      * @return Payment[]
      */
-    public function findRecentByStatus(PaymentStatus $status, int $limit = 5): array
+    public function findRecentByStatus(PaymentStatus $status, int $limit = 5, ?Client $client = null): array
     {
-        return $this->createQueryBuilder('p')
+        $qb = $this->createQueryBuilder('p')
             ->leftJoin('p.client', 'c')
             ->addSelect('c')
             ->andWhere('p.status = :status')
             ->setParameter('status', $status)
+            ->orderBy('p.insertionDate', 'DESC')
+            ->setMaxResults($limit);
+
+        if ($client !== null) {
+            $qb->andWhere('p.client = :client')->setParameter('client', $client);
+        }
+
+        return $qb->getQuery()->getResult();
+    }
+
+    /**
+     * Most recent payments for a client, any status (client dashboard "latest
+     * payments" panel).
+     *
+     * @return Payment[]
+     */
+    public function findRecentForClient(Client $client, int $limit = 8): array
+    {
+        return $this->createQueryBuilder('p')
+            ->andWhere('p.client = :client')
+            ->setParameter('client', $client)
             ->orderBy('p.insertionDate', 'DESC')
             ->setMaxResults($limit)
             ->getQuery()
