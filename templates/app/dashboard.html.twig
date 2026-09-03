@@ -1,0 +1,116 @@
+{% extends 'base.html.twig' %}
+{% import 'components/icons.html.twig' as icons %}
+
+{% block title %}Tableau de bord - Cyllos{% endblock %}
+{% block content_width %}content--full{% endblock %}
+
+{% block page_title %}Tableau de bord{% endblock %}
+{% block breadcrumb %}<div class="topbar__crumb">{{ client.name }}</div>{% endblock %}
+{% block page_actions %}
+    <a class="btn btn--secondary" href="{{ path('app_payment_list') }}">{{ icons.render('payments') }} Tous les paiements</a>
+{% endblock %}
+
+{% macro money(amount) %}{{ amount|number_format(2, ',', ' ') }} €{% endmacro %}
+
+{% block body %}
+    <div class="kpi-grid">
+        <div class="kpi">
+            <div class="kpi__value">{{ total }}</div>
+            <div class="kpi__label">Paiements ({{ windowDays }} j)</div>
+        </div>
+        <div class="kpi">
+            <div class="kpi__value">{{ credited }}</div>
+            <div class="kpi__label">Crédités</div>
+            <div class="kpi__sub">{{ _self.money(amounts.credited) }}</div>
+        </div>
+        <div class="kpi {{ failed > 0 ? 'kpi--danger' }}">
+            <div class="kpi__value">{{ failed }}</div>
+            <div class="kpi__label">Échecs</div>
+            <div class="kpi__sub">{{ failRate }} % · {{ _self.money(amounts.failed) }}</div>
+        </div>
+        <div class="kpi {{ toHandle > 0 ? 'kpi--warn' }}">
+            <div class="kpi__value">{{ toHandle }}</div>
+            <div class="kpi__label">À traiter</div>
+            <div class="kpi__sub">{{ _self.money(amounts.toHandle) }}</div>
+        </div>
+    </div>
+
+    <div class="summary-card" style="margin-bottom: 1.5rem;">
+        <div class="summary-card__header">
+            <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('payments') }}</span> Derniers paiements</div>
+            <a class="btn btn--ghost btn--sm" href="{{ path('app_payment_list') }}">Tout voir</a>
+        </div>
+        <div class="summary-card__body" style="overflow-x: auto;">
+            {% if recentPayments is empty %}
+                <p class="text-muted text-sm">{{ icons.render('inbox') }} Aucun paiement reçu pour le moment.</p>
+            {% else %}
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Payeur</th>
+                            <th style="text-align: right;">Montant</th>
+                            <th>Statut</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for payment in recentPayments %}
+                            <tr>
+                                <td class="cell-muted">{{ payment.paymentDate|date('d/m/Y H:i') }}</td>
+                                <td>{{ payment.payerFirstName }} {{ payment.payerLastName }}</td>
+                                <td class="cell-primary" style="text-align: right;">{{ payment.amount|number_format(2, ',', ' ') }} €</td>
+                                <td><span class="badge {{ payment.status.badgeClass }}">{{ payment.status.label }}</span></td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            {% endif %}
+        </div>
+    </div>
+
+    <div class="dashboard-cols" style="margin-bottom: 1.5rem;">
+        <div class="summary-card">
+            <div class="summary-card__header">
+                <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('x') }}</span> Derniers échecs</div>
+            </div>
+            <div class="summary-card__body">
+                {% if recentFailures is empty %}
+                    <p class="text-muted text-sm">{{ icons.render('check') }} Aucun paiement en échec.</p>
+                {% else %}
+                    <dl class="kv-list">
+                        {% for payment in recentFailures %}
+                            <div class="kv-row">
+                                <dt>
+                                    {{ payment.payerFirstName }} {{ payment.payerLastName }}
+                                    <span class="text-muted">· {{ payment.amount|number_format(2, ',', ' ') }} € · {{ payment.insertionDate|date('d/m H:i') }}</span>
+                                </dt>
+                                <dd>{{ payment.error ?: '—' }}</dd>
+                            </div>
+                        {% endfor %}
+                    </dl>
+                {% endif %}
+            </div>
+        </div>
+
+        <div class="summary-card">
+            <div class="summary-card__header">
+                <div class="summary-card__title"><span class="summary-card__icon">{{ icons.render('rule') }}</span> Règles e-mail</div>
+                <a class="btn btn--ghost btn--sm" href="{{ path('app_email_alias_list') }}">Gérer</a>
+            </div>
+            <div class="summary-card__body">
+                {% if recentRules is empty %}
+                    <p class="text-muted text-sm">Aucune règle de correction d'e-mail.</p>
+                {% else %}
+                    <dl class="kv-list">
+                        {% for rule in recentRules %}
+                            <div class="kv-row">
+                                <dt>{{ rule.sourceEmail }}</dt>
+                                <dd>{{ icons.render('chevron-right') }} {{ rule.targetEmail }}</dd>
+                            </div>
+                        {% endfor %}
+                    </dl>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+{% endblock %}

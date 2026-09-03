@@ -35,6 +35,6 @@ class SecurityController extends AbstractController
             return $this->redirectToRoute('admin_dashboard');
         }
 
-        return $this->redirectToRoute('app_payment_list');
+        return $this->redirectToRoute('app_dashboard');
     }
 }

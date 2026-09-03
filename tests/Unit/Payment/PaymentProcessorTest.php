@@ -104,8 +104,12 @@ class PaymentProcessorTest extends TestCase
         );
     }
 
-    public function testPeriodicFetchNeverAttemptsCreditEvenWithAutomaticEnabled(): void
+    public function testRecordOnlyFetchNeverAttemptsCreditEvenWithAutomaticEnabled(): void
     {
+        // Explicit opt-out ($attemptAutomaticCredit = false): a record-only sweep
+        // that must never move money, whatever the client setting says. The
+        // scheduled `app:helloasso:fetch` no longer uses this mode — it credits
+        // like a webhook — but the mode is still supported for callers that need it.
         $client = $this->makeClient(automatic: true);
 
         $helloAssoClient = $this->createStub(HelloAssoClient::class);
@@ -120,7 +124,7 @@ class PaymentProcessorTest extends TestCase
 
         $processor = $this->makeProcessor($helloAssoClient, $cyclosClient, $mailer);
 
-        $added = $processor->fetchMissingPayments($client);
+        $added = $processor->fetchMissingPayments($client, attemptAutomaticCredit: false);
 
         self::assertSame(1, $added);
     }
