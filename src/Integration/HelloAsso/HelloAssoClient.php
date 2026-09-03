@@ -32,6 +32,11 @@ class HelloAssoClient
      * isn't a well-formed payment notification (scam/empty body, "Order" events
      * which are sent alongside "Payment" events and must be ignored to avoid double
      * crediting, or malformed data).
+     *
+     * `data.amount` is accepted both as a flat integer of cents (the shape
+     * HelloAsso sends in a "Payment" webhook, and what the v5 payments API
+     * returns) and as a `{total, vat, discount}` object (the shape carried on the
+     * "Order" event and older payloads).
      */
     public function parseNotification(array $rawPayload): ?HelloAssoNotificationPayload
     {
@@ -59,14 +64,20 @@ class HelloAssoClient
         }
 
         $id = $data['id'] ?? null;
-        $amount = $data['amount']['total'] ?? null;
+        $rawAmount = $data['amount'] ?? null;
+        $amount = \is_array($rawAmount) ? ($rawAmount['total'] ?? null) : $rawAmount;
         $date = $data['date'] ?? null;
         $state = $data['state'] ?? null;
         $payer = $data['payer'] ?? null;
         $order = $data['order'] ?? null;
 
-        if ($id === null || $amount === null || $payer === null || $order === null) {
-            $this->logger->error('HelloAsso notification: missing required fields');
+        if ($id === null || !is_numeric($amount) || !\is_array($payer) || !\is_array($order)) {
+            $this->logger->error('HelloAsso notification: missing or malformed required fields', [
+                'hasId' => $id !== null,
+                'amountType' => get_debug_type($rawAmount),
+                'hasPayer' => \is_array($payer),
+                'hasOrder' => \is_array($order),
+            ]);
 
             return null;
         }
