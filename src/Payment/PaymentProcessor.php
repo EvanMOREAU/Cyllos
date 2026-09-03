@@ -140,11 +140,13 @@ class PaymentProcessor
 
     /**
      * Catch-up fetch: pulls the client's recent HelloAsso payment history and saves
-     * any payment not already known. Set $attemptAutomaticCredit to true to run each
-     * newly-discovered payment through the same automatic-credit decision as the
-     * real-time webhook (used by the manual "Synchro Hello Asso" button); left false
-     * for the periodic safety-net command, which only records missed payments as
-     * "todo" for manual review.
+     * any payment not already known. With $attemptAutomaticCredit = true (both the
+     * scheduled `app:helloasso:fetch` and the manual "Synchro Hello Asso" button)
+     * each newly-discovered payment runs through the same automatic-credit decision
+     * as a real-time webhook, so it is credited straight away when the client
+     * setting and the accepted delay allow it. Pass false for a record-only sweep
+     * that must never move money: every discovered payment is then left in "todo"
+     * for manual review.
      */
     public function fetchMissingPayments(Client $client, bool $attemptAutomaticCredit = false): int
     {

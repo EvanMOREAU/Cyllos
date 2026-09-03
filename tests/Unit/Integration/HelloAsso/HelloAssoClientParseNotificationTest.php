@@ -51,6 +51,51 @@ class HelloAssoClientParseNotificationTest extends TestCase
         self::assertSame('rollon-form', $result->formSlug);
     }
 
+    public function testParsesFlatIntegerAmount(): void
+    {
+        // The shape HelloAsso actually sends in a "Payment" webhook: data.amount
+        // is a flat integer of cents, not a {total, vat, discount} object.
+        $result = $this->client->parseNotification($this->validPayload([
+            'data' => ['amount' => 2000],
+        ]));
+
+        self::assertNotNull($result);
+        self::assertSame(2000, $result->amountCents);
+    }
+
+    public function testParsesRealPaymentWebhookPayload(): void
+    {
+        $payload = [
+            'data' => [
+                'cardExpirationDate' => '2034-12-31T00:00:00Z',
+                'order' => [
+                    'id' => 96646,
+                    'formSlug' => 'cyllos',
+                    'formType' => 'Shop',
+                    'organizationSlug' => 'cylaos-ict',
+                ],
+                'payer' => ['email' => 'support@cylaos.com', 'country' => 'FRA', 'firstName' => 'Eric', 'lastName' => 'DE BEL-AIR'],
+                'items' => [['shareAmount' => 2000, 'amount' => 2000, 'id' => 104740, 'type' => 'Product', 'state' => 'Processed']],
+                'cashOutState' => 'Transfered',
+                'id' => 67736,
+                'amount' => 2000,
+                'date' => '2026-09-03T18:59:50.8630226+02:00',
+                'state' => 'Authorized',
+                'refundOperations' => [],
+            ],
+            'eventType' => 'Payment',
+        ];
+
+        $result = $this->client->parseNotification($payload);
+
+        self::assertNotNull($result);
+        self::assertSame(67736, $result->helloAssoPaymentId);
+        self::assertSame(2000, $result->amountCents);
+        self::assertSame('Authorized', $result->state);
+        self::assertSame('support@cylaos.com', $result->payerEmail);
+        self::assertSame('cyllos', $result->formSlug);
+    }
+
     public function testIgnoresOrderEventTypeToAvoidDoubleCredit(): void
     {
         self::assertNull($this->client->parseNotification($this->validPayload(['eventType' => 'Order'])));
