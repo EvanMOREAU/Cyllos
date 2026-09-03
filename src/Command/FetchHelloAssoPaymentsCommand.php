@@ -17,7 +17,14 @@ use Symfony\Component\Messenger\Stamp\DelayStamp;
 /**
  * Catch-up fetch of recent HelloAsso payments, for every active client (or a
  * single one via --client). Equivalent to the manual "Synchro Hello Asso"
- * button in the legacy tool, run here as a safety net for missed webhooks.
+ * button, run here as a safety net for missed webhooks.
+ *
+ * Every discovered payment runs through the same automatic-credit decision as a
+ * real-time webhook ($attemptAutomaticCredit = true): if the client has
+ * automatic crediting on and the payment is within the accepted delay, it is
+ * credited on Cyclos straight away instead of waiting in "todo" for a manual
+ * review. Payments too old for automatic crediting still fall back to "todo" /
+ * "too_late" via the shared decision (see PaymentProcessor::applyAutomaticDecision).
  *
  * By default (the scheduled run) it fans out one FetchClientPaymentsMessage per
  * active client onto the async queue, each with a small random delay, so the
@@ -60,7 +67,7 @@ class FetchHelloAssoPaymentsCommand extends Command
                 return Command::FAILURE;
             }
 
-            $added = $this->paymentProcessor->fetchMissingPayments($client);
+            $added = $this->paymentProcessor->fetchMissingPayments($client, attemptAutomaticCredit: true);
             $io->writeln(\sprintf('%s: %d nouveau(x) paiement(s)', $client->getName(), $added));
 
             return Command::SUCCESS;
@@ -70,7 +77,7 @@ class FetchHelloAssoPaymentsCommand extends Command
 
         if ($input->getOption('sync')) {
             foreach ($clients as $client) {
-                $added = $this->paymentProcessor->fetchMissingPayments($client);
+                $added = $this->paymentProcessor->fetchMissingPayments($client, attemptAutomaticCredit: true);
                 $io->writeln(\sprintf('%s: %d nouveau(x) paiement(s)', $client->getName(), $added));
             }
 
@@ -79,7 +86,7 @@ class FetchHelloAssoPaymentsCommand extends Command
 
         foreach ($clients as $client) {
             $this->messageBus->dispatch(
-                new FetchClientPaymentsMessage($client->getId()),
+                new FetchClientPaymentsMessage($client->getId(), attemptAutomaticCredit: true),
                 [new DelayStamp(random_int(0, self::FANOUT_JITTER_MS))],
             );
         }

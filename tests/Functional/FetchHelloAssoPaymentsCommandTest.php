@@ -52,13 +52,20 @@ class FetchHelloAssoPaymentsCommandTest extends KernelTestCase
 
         /** @var InMemoryTransport $transport */
         $transport = self::getContainer()->get('messenger.transport.async');
-        $ids = array_map(
-            static fn ($envelope) => $envelope->getMessage()->clientId,
+        $fetchMessages = array_map(
+            static fn ($envelope) => $envelope->getMessage(),
             array_filter($transport->getSent(), static fn ($e) => $e->getMessage() instanceof FetchClientPaymentsMessage),
         );
 
+        $ids = array_map(static fn ($m) => $m->clientId, $fetchMessages);
         sort($ids);
         self::assertSame([$a->getId(), $b->getId()], $ids);
+
+        // The scheduled sweep must credit discovered payments, not just record
+        // them as "todo" — same automatic-credit decision as a real-time webhook.
+        foreach ($fetchMessages as $message) {
+            self::assertTrue($message->attemptAutomaticCredit);
+        }
     }
 
     public function testSyncOptionDoesNotDispatchMessages(): void
